@@ -11,8 +11,8 @@ int _pogo_call_sv(void* func, void* argref) {
 	I32		j, ac, outs;
 	int		result;
 	dSP;
-	codesv = func;
-	argvref = argref;
+	codesv = (SV*)func;
+	argvref = (SV*)argref;
 	ENTER;
 	PUSHMARK(sp);
 	if( argvref ) {

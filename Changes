@@ -30,3 +30,8 @@ Revision history for Perl extension Pogo.
 	- modify new_tie's to accept $pogo and $blessclass arguments
 	- add PogoLink.pm
 	- add sample/person.pl
+
+0.08  2000/1/18
+	- fix a bug in pogocall.c
+	- modify documents in PogoLink.pm
+	- add PogoLink.jp.pod

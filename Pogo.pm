@@ -11,7 +11,7 @@ require AutoLoader;
 
 @ISA = qw(Exporter DynaLoader);
 @EXPORT = qw();
-$VERSION = '0.07';
+$VERSION = '0.08';
 
 bootstrap Pogo $VERSION;
 

@@ -1,0 +1,163 @@
+=head1 名称
+
+PogoLink - Pogoデータベース中のオブジェクトの双方向関係を実現するクラス
+
+=head1 概要
+
+  use PogoLink;
+  # 関係の定義
+  package Person;
+  sub new {
+      my($class, $pogo, $name) = @_;
+      # Make a hash ref persistent by $pogo and blessed by $class
+      my $self = new_tie Pogo::Hash 8, $pogo, $class;
+      %$self = (
+          NAME     => $name,
+          FATHER   => new PogoLink::Scalar($self, 'Man',    'CHILDREN'),
+          MOTHER   => new PogoLink::Scalar($self, 'Woman',  'CHILDREN'),
+          FRIENDS  => new PogoLink::Btree ($self, 'Person', 'FRIENDS', 'NAME'),
+      );
+      $self;
+  }
+  package Man;
+  @ISA = qw(Person);
+  sub new {
+      my($class, $pogo, $name) = @_;
+      my $self = $class->SUPER::new($pogo, $name);
+      $self->{CHILDREN} = new PogoLink::Array ($self, 'Person', 'FATHER');
+      $self->{WIFE}     = new PogoLink::Scalar($self, 'Woman',  'HUS');
+      $self;
+  }
+  package Woman;
+  @ISA = qw(Person);
+  sub new {
+      my($class, $pogo, $name) = @_;
+      my $self = $class->SUPER::new($pogo, $name);
+      $self->{CHILDREN} = new PogoLink::Array ($self, 'Person', 'MOTHER');
+      $self->{HUS}      = new PogoLink::Scalar($self, 'Man',    'WIFE');
+      $self;
+  }
+
+  # 関係の使用
+  $Pogo = new Pogo 'sample.cfg';
+  $Dad = new Man   $Pogo, 'Dad';
+  $Mom = new Woman $Pogo, 'Mom';
+  $Jr  = new Man   $Pogo, 'Jr';
+  $Gal = new Woman $Pogo, 'Gal';
+  # 結婚
+  $Dad->{WIFE}->add($Mom);     # $Mom->{HUS} は自動的に $Dad を指す
+  # 誕生
+  $Dad->{CHILDREN}->add($Jr);  # $Jr->{FATHER} は自動的に $Dad を指す
+  $Mom->{CHILDREN}->add($Jr);  # $Jr->{MOTHER} は自動的に $Mom を指す
+  # Jrに友達ができる
+  $Jr->{FRIENDS}->add($Gal);   # $Gal->{FRIENDS} は自動的に $Jr を指す
+  # おっと、GalがDadをゲットしちゃった
+  $Gal->{HUS}->add($Dad);      # $Dad->{WIFE} は自動的に $Gal を指す
+                               # $Mom->{HUS} は自動的に $Dad を指さなくなる
+
+=head1 解説
+
+PogoLink は、一対一、一対多、多対多の双方向関係を、Pogo データベース中
+のオブジェクト間に作ります。その関係は、お互いを正しく指すように、自動
+的に保たれます。関係の多端を作るのに、Pogo::Array, Pogo::Hash, Pogo:: 
+Htree, Pogo::Btree, Pogo::Ntree のどれかを選べます。
+
+=over 4
+
+=head2 クラス
+
+=item PogoLink::Scalar
+
+一対一や一対多関係の一端を作ります。
+
+=item PogoLink::Array
+
+一対多や多対多関係の多端を、配列として作ります。Pogo::Array が使われま
+す。
+
+=item PogoLink::Hash, PogoLink::Htree, PogoLink::Btree, PogoLink::Ntree
+
+これらのクラスは、多端をハッシュとして作ります。それぞれ対応した Pogo:
+:*が使われます。
+
+=head2 メソッド
+
+=item new PogoLink::* $selfobject, $linkclass, $invattr, $keyattr
+
+コンストラクタ。クラスメソッド。$selfobject はこの関係を持つデータベー
+ス中のオブジェクトです。ハッシュ参照としてのオブジェクトでなければなり
+ません。$linkclass はこの関係が指す相手オブジェクトのクラス名です。省 
+略すると、どんなクラスのオブジェクトでも許されます。$invattr はこの関 
+係の相手オブジェクトの属性名（ハッシュキー）で、その属性が逆に相手から
+こちらを指すことになります。$keyattr は、PogoLink::Hash, PogoLink::   
+Htree, PogoLink::Btree, PogoLink::Ntree についてだけ必要で、この関係の
+相手オブジェクトの属性名（ハッシュキー）で、その属性値がハッシュキーと
+して使われます。
+
+注意：PogoLink::*コンストラクタを、クラスのコンストラクタの中で次のよ 
+うに使うことはできません。
+
+  sub new {
+      my($class) = @_;
+      my $self = {};
+      bless $self, $class;
+      $self->{FOO} = new PogoLink::Scalar $self, 'Foo', 'BAR';
+      $self;
+  }
+
+なぜなら、PogoLink::*コンストラクタの引数となるそのオブジェクト自身は、
+データベース中のオブジェクトでなければならないからです。この例では、  
+$self はまだメモリ上にあるだけです。正しくは次のようにします。
+
+  sub new {
+      my($class, $pogo) = @_;
+      my $self = new_tie Pogo::Hash 8, $pogo, $class;
+      $self->{FOO} = new PogoLink::Scalar $self, 'Foo', 'BAR';
+      $self;
+  }
+
+Pogo オブジェクトとクラス名を引数とした new_tie を使えば、データベース
+に格納され、bless された参照が得られるのです。
+
+=item get $idx_or_key
+
+関係の相手オブジェクトを返します。PogoLink::Scalar では $idx_or_key は
+不要です。PogoLink::Array では、$idx_or_key は配列の添字番号です。その
+他の場合は、$idx_or_key はハッシュキーです。
+
+=item getlist
+
+関係の相手オブジェクトのリストを返します。
+
+=item getkeylist
+
+関係の相手のリストを、ハッシュのキーのリストとして返します。PogoLink::
+Hash, PogoLink::Htree, PogoLink::Btree, PogoLink::Ntree についてだけ有
+効なメソッドです。
+
+=item find $object
+
+関係の相手に$objectがあるか調べます。あれば真を返します。
+
+=item clear
+
+関係の全ての相手オブジェクトへの関係を断ちます。
+
+=item del $object
+
+$objectへの関係を断ちます。
+
+=item add $object
+
+$objectへの関係を追加します。
+
+=back
+
+=head1 作者
+
+中島　靖 <sey@jkc.co.jp>
+
+=head1 参照
+
+Pogo(3). 
+sample/person.pl.

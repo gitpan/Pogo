@@ -205,11 +205,12 @@ __END__
 
 =head1 NAME
 
-PogoLink - Bidirectional relationship class for Pogo objects
+PogoLink - Bidirectional relationship class for objects in a Pogo database
 
 =head1 SYNOPSIS
 
   use PogoLink;
+  # Define relationships
   package Person;
   sub new {
       my($class, $pogo, $name) = @_;
@@ -241,14 +242,13 @@ PogoLink - Bidirectional relationship class for Pogo objects
       $self->{HUS}      = new PogoLink::Scalar($self, 'Man',    'WIFE');
       $self;
   }
+
+  # Use relationships
   $Pogo = new Pogo 'sample.cfg';
-  $Root = $Pogo->root_tie;
-  $Root->{PERSONS} = new Pogo::Btree;
-  $Persons = $Root->{PERSONS};
-  $Dad = $Persons->{Dad} = new Man   $Pogo, 'Dad';
-  $Mom = $Persons->{Mom} = new Woman $Pogo, 'Mom';
-  $Jr  = $Persons->{Jr}  = new Man   $Pogo, 'Jr';
-  $Gal = $Persons->{Gal} = new Woman $Pogo, 'Gal';
+  $Dad = new Man   $Pogo, 'Dad';
+  $Mom = new Woman $Pogo, 'Mom';
+  $Jr  = new Man   $Pogo, 'Jr';
+  $Gal = new Woman $Pogo, 'Gal';
   # Marriage 
   $Dad->{WIFE}->add($Mom);     # $Mom->{HUS} links to $Dad automatically
   # Birth
@@ -263,10 +263,10 @@ PogoLink - Bidirectional relationship class for Pogo objects
 =head1 DESCRIPTION
 
 PogoLink makes single-single or single-multi or multi-multi bidirectional 
-relationships between Pogo objects. The relationships are automatically 
-maintained to link each other correctly. You can choose one of Pogo::Array,
-Pogo::Hash, Pogo::Htree, Pogo::Btree and Pogo::Ntree to make a multi end of 
-link.
+relationships between objects in a Pogo database. The relationships are 
+automatically maintained to link each other correctly. You can choose one 
+of Pogo::Array, Pogo::Hash, Pogo::Htree, Pogo::Btree and Pogo::Ntree to make 
+a multi end of link.
 
 =over 4
 
@@ -290,14 +290,38 @@ Pogo::* to have links.
 
 =item new PogoLink::* $selfobject, $linkclass, $invattr, $keyattr
 
-Constructor. Class method. $selfobject is a Pogo persistent object which 
-possesses this link. 
-It must be a object as a hash reference. $linkclass is a class name of linked 
-object. If $linkclass defaults, any class object is allowed. $invattr is an
-attribute (i.e. hash key) name of the linked object which links inversely. 
-$keyattr is only necessary for PogoLink::Hash, PogoLink::Htree, PogoLink::Btree, 
-PogoLink::Ntree. It specifies an attribute name of the linked object thats 
-value is used as the key of this link hash.
+Constructor. Class method. $selfobject is a object in the database which 
+possesses this link. It must be a object as a hash reference. 
+$linkclass is a class name of linked object. If $linkclass defaults, 
+any class object is allowed. $invattr is an attribute (i.e. hash key) name 
+of the linked object which links inversely. $keyattr is only necessary for 
+PogoLink::Hash, PogoLink::Htree, PogoLink::Btree, PogoLink::Ntree. 
+It specifies an attribute name of the linked object thats value is used as 
+the key of this link hash.
+
+NOTE: You cannot use PogoLink::* constructors as follows in a class constructor.
+
+  sub new {
+      my($class) = @_;
+      my $self = {};
+      bless $self, $class;
+      $self->{FOO} = new PogoLink::Scalar $self, 'Foo', 'BAR';
+      $self;
+  }
+
+Because the self-object which is passed to PogoLink::* constructors must 
+be a object in the database. In the above sample, $self is on the memory yet.
+The right way is as follows.
+
+  sub new {
+      my($class, $pogo) = @_;
+      my $self = new_tie Pogo::Hash 8, $pogo, $class;
+      $self->{FOO} = new PogoLink::Scalar $self, 'Foo', 'BAR';
+      $self;
+  }
+
+You can make a database-stored and blessed reference by using new_tie which 
+takes a Pogo object and a class name as arguments.
 
 =item get $idx_or_key
 
@@ -339,3 +363,4 @@ Sey Nakajima <sey@jkc.co.jp>
 =head1 SEE ALSO
 
 Pogo(3). 
+sample/person.pl.
