@@ -1,0 +1,32 @@
+Revision history for Perl extension Pogo.
+
+0.01  1999/12/7
+	- original version; created by h2xs 1.19
+
+0.02  1999/12/17
+	- first release
+
+0.03  1999/12/18
+	- fix a bug in Pogo::Array::remove
+	- fix a bug in Pogo::Array::SPLICE
+	- add a document of Pogo::Btree::find_key
+
+0.04  1999/12/19
+	- add Pogo::wait_modification function
+
+0.05  1999/12/20
+	- fix a bug in browse
+	- rename Pogo::who to Pogo::type_of
+	- add a sample script schedule.pl
+
+0.06  1999/12/27
+	- add Pogo::Btree::last_key and Pogo::Btree::prev_key methods
+	- add Pogo::equal and Pogo::object_id functions
+	- browse shows object id
+
+0.07  2000/1/15
+	- fix a bug in Pogo::equal
+	- add Pogo::Ntree
+	- modify new_tie's to accept $pogo and $blessclass arguments
+	- add PogoLink.pm
+	- add sample/person.pl
