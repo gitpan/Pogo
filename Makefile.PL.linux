@@ -1,6 +1,11 @@
 # When you compiled GOODS using makefile.gcc on Linux, use this
 use ExtUtils::MakeMaker;
 
+my $argdef = '';
+for my $arg(@ARGV) {
+	$argdef .= "$arg " if $arg =~ /^-D/;
+}
+
 WriteMakefile(
     'NAME'      => 'Pogo',
     'VERSION_FROM' => 'Pogo.pm', # finds $VERSION
@@ -8,7 +13,7 @@ WriteMakefile(
     'LD'        => '$(CC)',
     'LDDLFLAGS' => '-shared -L/usr/local/lib',
     'LIBS'      => '-lstdc++ -L/usr/local/goods/lib -lclient',
-    'DEFINE'    => '',     # e.g., '-DHAVE_SOMETHING'
+    'DEFINE'	=> "$argdef",
     'INC'       => '-I/usr/local/goods/inc',
     'XSPROTOARG' => '-noprototypes',
     'OBJECT'    => 'Pogo.o pogomain.o pogogcls.o pogocall.o nstring.o',

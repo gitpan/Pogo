@@ -44,6 +44,7 @@ Pogo は GOODS (Generic Object Oriented Database System)の Perl インタ
   - ハッシュ
   - Hツリー (ハッシュエントリ表がBツリーとなっているハッシュ)
   - Bツリー
+  - Nツリー（キーが整数値のBツリー）
 
 スカラーデータや集合タイプデータの要素の値は、文字列か、他のデータへの
 参照です。Pogo は Perl の tie の仕組みを利用してデータベース中の永続デ
@@ -167,7 +168,7 @@ root_tie メソッドは、このルート B ツリーデータへの参照を返します。
 hash を変更しても、$root->{key1}の配列や $root->{key3}のハッシュが変更
 されるわけではありません。
 
-格納した値を得るには、普通に -> や [] や {} の記号を使えばよい。
+格納した値を得るには、普通に ->[] や ->{} の記法を使うことができます。
 
   $value = $root->{key5}->{a}->[1];  # $value は 2
   $value = $root->{key5}{a}[1];      # {} や [] の間の -> は省略可能
@@ -229,7 +230,7 @@ Pogo のハッシュのハッシュエントリ表は固定サイズの配列なので、あまり大
 列されることになります。また、ハッシュエントリ表のサイズのサイズの問題
 はありません。その一方で、Pogo の B ツリーのキー索引はキー文字列の先頭
 8バイトから作られるため、もし多くのキーが先頭8バイトが同じであると、そ
-のキーを検索は遅くなります。B ツリーを作るには、Pogo::Btree::new メソ 
+のキーの検索は遅くなります。B ツリーを作るには、Pogo::Btree::new メソ 
 ッドを使います。
 
   $root->{btree} = new Pogo::Btree;
@@ -389,8 +390,13 @@ ID が表示されます。
 
 =item $pogo->close
 
-GOODS サーバーとの接続を切ります。このメソッドを使う必要はありません。
+GOODS サーバーとの接続を切ります。通常はこのメソッドを使う必要はありません。
 Pogo オブジェクトが破棄されるときに自動的に実行されます。
+
+=item $pogo->opened
+
+Pogo オブジェクトが GOODS サーバーに接続していれば 1、接続していなけれ
+ば 0 を返します。
 
 =item $pogo->root
 
@@ -418,87 +424,92 @@ Pogo オブジェクトが破棄されるときに自動的に実行されます。
 クラスメソッド。Pogo::Scalar オブジェクトを作って返します。Pogo オブジ
 ェクト pogoobj を指定した場合は、そのデータベースに格納されます。
 
-=item $scalarref = Pogo::Scalar->new_tie [pogoobj [,class]]
+=item $scalarref = Pogo::Scalar->new_tie [pogovar ,class]
 
 クラスメソッド。Pogo::Scalar オブジェクトを作り、スカラをそれに tie し、
-そのスカラの参照を返します。Pogo オブジェクト pogoobj を指定した場合は、
-そのデータベースに格納されます。クラス名 class を指定した場合は、その 
+そのスカラの参照を返します。Pogo の変数 pogovar が指定され、それがすで
+にデータベースにアタッチされている場合は、同じデータベースにアタッチさ
+れます。クラス名 class を指定した場合は、その 
 クラス名で bless されます。
 
-=item $obj = Pogo::Array->new [size [,pogoobj]]
+=item $obj = Pogo::Array->new [size ,pogoobj]
 
 クラスメソッド。size で指定されたサイズの Pogo::Array オブジェクトを作
 って返します。size が省略されると、1になります。Pogo オブジェクト     
 pogoobj を指定した場合は、そのデータベースに格納されます。
 
-=item $arrayref = Pogo::Array->new_tie [size [,pogoobj [,class]]]
+=item $arrayref = Pogo::Array->new_tie [size ,pogovar ,class]
 
 クラスメソッド。size で指定されたサイズの Pogo::Array オブジェクトを作
 り、配列をそれに tie し、その配列の参照を返します。 size が省略される 
-と、1になります。Pogo オブジェクト pogoobj を指定した場合は、そのデー 
-タベースに格納されます。クラス名 class を指定した場合は、そのクラス名 
+と、1になります。Pogo の変数 pogovar が指定され、それがすでにデータベ 
+ースにアタッチされている場合は、同じデータベースにアタッチされます。ク
+ラス名 class を指定した場合は、そのクラス名 
 で bless されます。
 
-=item $obj = Pogo::Hash->new [size [,pogoobj]]
+=item $obj = Pogo::Hash->new [size ,pogoobj]
 
 クラスメソッド。size で指定されたサイズのハッシュエントリ表の Pogo::  
 Hash オブジェクトを作って返します。size が省略されると、256 になります。
 Pogo オブジェクト pogoobj を指定した場合は、そのデータベースに格納され
 ます。
 
-=item $hashref = Pogo::Hash->new_tie [size [,pogoobj [,class]]]
+=item $hashref = Pogo::Hash->new_tie [size ,pogovar ,class]
 
 クラスメソッド。size で指定されたサイズのハッシュエントリ表の Pogo::  
 Hash オブジェクトを作り、ハッシュをそれに tie し、そのハッシュの参照を
-返します。size が省略されると、256 になります。Pogo オブジェクト      
-pogoobj を指定した場合は、そのデータベースに格納されます。クラス名    
-class を指定した場合は、そのクラス名で bless されます。
+返します。size が省略されると、256 になります。Pogo の変数 pogovar が 
+指定され、それがすでにデータベースにアタッチされている場合は、同じデー
+タベースにアタッチされます。クラス名 class を指定した場合は、そのクラ 
+ス名で bless されます。
 
-=item $obj = Pogo::Htree->new [size [,pogoobj]]
+=item $obj = Pogo::Htree->new [size ,pogoobj]
 
 クラスメソッド。size で指定されたサイズのハッシュエントリ表の Pogo::  
 Htree オブジェクトを作って返します。size が省略されると、 65536 になり
 ます。Pogo オブジェクト pogoobj を指定した場合は、そのデータベースに格
 納されます。
 
-=item $hashref = Pogo::Htree->new_tie [size [,pogoobj [,class]]]
+=item $hashref = Pogo::Htree->new_tie [size ,pogovar ,class]
 
 クラスメソッド。size で指定されたサイズのハッシュエントリ表の Pogo::  
 Htree オブジェクトを作り、ハッシュをそれに tie し、そのハッシュの参照 
-を返します。size が省略されると、 65536 になります。Pogo オブジェクト 
-pogoobj を指定した場合は、そのデータベースに格納されます。クラス名    
-class を指定した場合は、そのクラス名で bless されます。
+を返します。size が省略されると、 65536 になります。Pogo の変数       
+pogovar が指定され、それがすでにデータベースにアタッチされている場合は、
+同じデータベースにアタッチされます。クラス名 class を指定した場合は、 
+そのクラス名で bless されます。
 
 =item $obj = Pogo::Btree->new [pogoobj]
 
 クラスメソッド。Pogo::Btree オブジェクトを作って返します。Pogo オブジ 
 ェクト pogoobj を指定した場合は、そのデータベースに格納されます。
 
-=item $hashref = Pogo::Btree->new_tie [pogoobj [,class]]
+=item $hashref = Pogo::Btree->new_tie [pogovar ,class]
 
 クラスメソッド。Pogo::Btree オブジェクトを作り、ハッシュをそれに tie  
-し、そのハッシュの参照を返します。Pogo オブジェクト pogoobj を指定した
-場合は、そのデータベースに格納されます。クラス名 class を指定した場合 
-は、そのクラス名で bless されます。
+し、そのハッシュの参照を返します。Pogo の変数 pogovar が指定され、それ
+がすでにデータベースにアタッチされている場合は、同じデータベースにアタ
+ッチされます。クラス名 class を指定した場合は、そのクラス名で bless さ
+れます。
 
 =item $obj = Pogo::Ntree->new [pogoobj]
 
 クラスメソッド。Pogo::Ntree オブジェクトを作って返します。Pogo オブジ 
 ェクト pogoobj を指定した場合は、そのデータベースに格納されます。
 
-=item $hashref = Pogo::Ntree->new_tie [pogoobj [,class]]
+=item $hashref = Pogo::Ntree->new_tie [pogovar ,class]
 
 クラスメソッド。Pogo::Ntree オブジェクトを作り、ハッシュをそれに tie  
-し、そのハッシュの参照を返します。Pogo オブジェクト pogoobj を指定した
-場合は、そのデータベースに格納されます。クラス名 class を指定した場合 
-は、そのクラス名で bless されます。
+し、そのハッシュの参照を返します。Pogo の変数 pogovar が指定され、それ
+がすでにデータベースにアタッチされている場合は、同じデータベースにアタ
+ッチされます。クラス名 class を指定した場合は、そのクラス名で bless さ
+れます。
 
 ノート：これらの Pogo::*::new や Pogo::*::new_tie メソッドで作られたオ
-ブジェクトは、引数で Pogo オブジェクトが指定されない限り、メモリ上にあ
-り、まだ永続的ではありません。既存の永続データに代入された時に始めて、
-永続データになります。また、引数に Pogo オブジェクトを指定すると、その
-データベースに格納されますが、やはり既存の永続データに参照されて始めて
-真に永続データになります。
+ブジェクトは、メモリ上にあり、まだ永続的ではありません。既存の永続デー
+タに参照された時に始めて、永続データになります。また、引数に Pogo オブ
+ジェクトを指定すると、そのデータベースに格納されますが、やはり既存の永
+続データに参照されて始めて真に永続データになります。
 
 =back
 
@@ -555,6 +566,14 @@ funcはスカラコンテキストで呼ばれ、返り値は整数に変換されます。
 
 時間切れまでの秒数が省略されると、永遠に待ちます。
 
+=item Pogo::get_root_tie
+
+引数に指定された Pogo データから、データベースのルート B ツリーに対応 
+した Pogo::Btree オブジェクトを得て、それに tie されたハッシュへの参照
+を返します。 
+
+  $root = Pogo::get_root_tie($pogovar);
+
 =back
 
 =head2 低レベルメソッド
@@ -573,6 +592,8 @@ Var オブジェクトは使えません。
   Pogo::Var::begin_transaction
   Pogo::Var::abort_transaction
   Pogo::Var::end_transaction
+  Pogo::Var::root
+  Pogo::Var::root_tie
   Pogo::Var::call
   Pogo::Var::equal
   Pogo::Var::wait_modification
@@ -615,7 +636,9 @@ Var オブジェクトは使えません。
   Pogo::Htree::first_key
   Pogo::Htree::next_key
 
-=item Pogo::Btree
+=item Pogo::Btree, Pogo::Ntree
+
+以下のメソッドはPogo::Ntreeでも同じ
 
   Pogo::Btree::get
   Pogo::Btree::set
@@ -630,9 +653,34 @@ Var オブジェクトは使えません。
 
 =back
 
+=head2 低レベルクラスの派生とメソッドのフック
+
+低レベルクラスからの派生クラスを作ってメソッドをオーバーライドすることができます。また、メソッドをオーバーライドする代わりに、メソッドをフックする仕組みも用意されています。
+
+例えばPogo::Array::setメソッドをフックしたい場合は次のようにします。
+
+  # MyArray.pm
+  package MyArray;
+  @ISA = qw(Pogo::Array);
+  %HOOK = (set => \&set_hook);  # set() メソッドを set_hook() でフック
+  sub set_hook {
+    my($self, $idx, $value) = @_;
+    do_something($self, $idx, $value);
+    1;     # 偽を返すと元のメソッドは呼ばれない
+  }
+  ...
+  1;
+
+そして次のようにします。
+
+  use MyArray;
+  $obj = new MyArray;
+  $obj->set(0, "value"); # set_hook($obj, 0, "value") と Pogo::Array::set($obj, 0, "value") が呼ばれる
+
+
 =head1 AUTHOR
 
-中島 靖 <sey@jkc.co.jp>
+中島 靖 <nakajima@netstock.co.jp>
 
 =head1 SEE ALSO
 

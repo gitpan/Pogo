@@ -11,7 +11,7 @@ require AutoLoader;
 
 @ISA = qw(Exporter DynaLoader);
 @EXPORT = qw();
-$VERSION = '0.08';
+$VERSION = '0.10';
 
 bootstrap Pogo $VERSION;
 
@@ -22,23 +22,26 @@ bootstrap Pogo $VERSION;
 sub root_tie {
 	my $self = shift;
 	my $class = ref $self;
-	croak "Pogo objectrequired" unless $class eq 'Pogo';
-	tie my %var, $class, $self;
+	croak "Pogo object required" if !ref($self) || !$self->isa('Pogo');
+	tie my %var, $class, $self->root;
 	\%var;
 }
-# tie %root, 'Pogo', $pogoobj;
+# tie %root, 'Pogo', $rootobj;
 sub TIEHASH {
 	my($class, $obj) = @_;
-	croak("cfg filename or Pogo object required") unless ref($obj) eq 'Pogo';
-	$obj->root;
+	$obj;
 }
 
+#-----------------
+# NOT method below
+#-----------------
 # ($reftype, $class, $tiedclass) = Pogo::type_of($pogovar);
 sub type_of {
 	my($var) = @_;
 	my($type, $class, $tiedclass);
 	if( ref $var ) {
-		($class, $type) = overload::StrVal($var) =~ /^(?:(.*)\=)?([^=]*)\(/;
+		($class, $type) = ref($var) && 
+			overload::StrVal($var) =~ /^(?:(.*)\=)?([^=]*)\(/;
 		if( $type eq 'SCALAR' ) {
 			$tiedclass = ref tied $$var;
 		} elsif( $type eq 'ARRAY' ) {
@@ -55,7 +58,8 @@ sub tied_object {
 	my($var) = @_;
 	my($type, $class, $tiedobj);
 	if( ref $var ) {
-		($class, $type) = overload::StrVal($var) =~ /^(?:(.*)\=)?([^=]*)\(/;
+		($class, $type) = ref($var) && 
+			overload::StrVal($var) =~ /^(?:(.*)\=)?([^=]*)\(/;
 		if( $type eq 'SCALAR' ) {
 			$tiedobj = tied $$var;
 		} elsif( $type eq 'ARRAY' ) {
@@ -64,7 +68,7 @@ sub tied_object {
 			$tiedobj = tied %$var;
 		}
 	}
-	return undef unless ref($tiedobj) =~ /^Pogo::/;
+	return undef unless UNIVERSAL::isa($tiedobj, 'Pogo::Var');
 	$tiedobj;
 }
 
@@ -90,8 +94,8 @@ sub equal {
 	my($var1, $var2) = @_;
 	my $tiedobj1 = tied_object($var1);
 	my $tiedobj2 = tied_object($var2);
-	return 0 unless defined $tiedobj1;
-	$tiedobj1->equal($tiedobj2);
+	if( $tiedobj1 && $tiedobj2 ) { $tiedobj1->equal($tiedobj2); }
+	else { $var1 eq $var2 }
 }
 
 # $result = Pogo::wait_modification($pogovar, $sec);
@@ -102,6 +106,15 @@ sub wait_modification {
 	$tiedobj->wait_modification($sec);
 }
 
+# $root = Pogo::get_root_tie($pogovar);
+sub get_root_tie {
+	my($var) = @_;
+	my $tiedobj = tied_object($var);
+	return undef unless $tiedobj;
+	$tiedobj->root_tie;
+}
+
+# for debug
 sub D { 
 	my $func = (caller(1))[3]; 
 	my $callfunc = (caller(2))[3]; 
@@ -109,22 +122,22 @@ sub D {
 }
 
 # internal functions for tie interface 
-sub wrap { # &D; # for debugging
+sub wrap { # &D; # for debug
 	my $val = shift;
 	my $type = ref $val;
 	return $val unless $type;
 	my $result;
-	if( $type eq 'Pogo::Scalar' ) {
+	if( $val->isa('Pogo::Scalar') ) {
 		tie my $tiedvar, $type, $val;
 		$result = \$tiedvar;
-	} elsif( $type eq 'Pogo::Array' ) {
+	} elsif( $val->isa('Pogo::Array') || $val->isa('Pogo::SNArray') ) {
 		tie my @tiedvar, $type, $val;
 		$result = \@tiedvar;
-	} elsif( $type =~ /^Pogo::/ ) {
+	} elsif( $val->isa('Pogo::Var') ) {
 		tie my %tiedvar, $type, $val;
 		$result = \%tiedvar;
 	} else {
-		croak "Why? No Pogo::* object got";
+		croak "Why? $type - No Pogo::* object got";
 	}
 	my $class = $val->get_class;
 	bless $result, $class if $class;
@@ -133,12 +146,11 @@ sub wrap { # &D; # for debugging
 
 sub strip { # &D; # for debugging
 	my $var = shift;
-	my $type = ref $var;
-	if( $type eq "" || $type =~ /^Pogo::/ ) {
-		return $var;
-	}
-	my($tieobj, $class, $tieclass);
-	($class, $type) = overload::StrVal($var) =~ /^(?:(.*)\=)?([^=]*)\(/;
+	return $var unless ref($var);
+	my($tieobj, $class, $type);
+	($class, $type) = ref($var) && 
+		overload::StrVal($var) =~ /^(?:(.*)\=)?([^=]*)\(/;
+	return $var if $class && $var->isa('Pogo::Var');
 	if( $type eq 'SCALAR' ) {
 		$tieobj = tied $$var;
 	} elsif( $type eq 'ARRAY' ) {
@@ -148,8 +160,7 @@ sub strip { # &D; # for debugging
 	} else {
 		croak "Only SCALAR/ARRAY/HASH reference is available";
 	}
-	$tieclass = ref $tieobj;
-	if( $tieclass =~ /^Pogo::/ ) {
+	if( ref($tieobj) && $tieobj->isa('Pogo::Var') ) {
 		$tieobj->set_class($class) if $class;
 		return $tieobj;
 	}
@@ -176,11 +187,36 @@ package Pogo::Var;
 use Carp;
 use strict;
 
+sub root_tie {
+	my($self) = @_;
+	my $rootobj = $self->root;
+	return undef unless $rootobj;
+	tie my %var, 'Pogo', $rootobj;
+	\%var;
+}
 sub call {
 	my($self, $func, $argref) = @_;
 	croak "CODE reference required" unless ref($func) eq 'CODE';
+	$argref = [] unless defined $argref;
 	croak "ARRAY reference required" unless ref($argref) eq 'ARRAY';
 	_call($self, $func, $argref);
+}
+sub equal {
+	my($self, $arg) = @_;
+	UNIVERSAL::isa($arg, 'Pogo::Var') ? _equal($self, $arg) : 0;
+}
+sub import {
+	my($class, @arg) = @_;
+	no strict 'refs';
+	my $hookref = \%{"${class}::HOOK"};
+	return unless $hookref;
+	for my $method(keys %$hookref) {
+		my $subref = $hookref->{$method};
+		carp("code reference required"),next unless ref($subref) eq 'CODE';
+		my $orgmethod = $class->can($method);
+		carp("$method - no such method"),next unless $orgmethod;
+		*{"${class}::$method"} = sub { &$subref and &$orgmethod }
+	}
 }
 
 package Pogo::Scalar;
@@ -188,23 +224,20 @@ use Carp;
 use strict;
 use vars qw(@ISA);
 @ISA = qw(Pogo::Var);
-BEGIN {
-	*wrap = \&Pogo::wrap;
-	*strip = \&Pogo::strip;
-}
-# $ref = new_tie Pogo::Scalar [,$pogo, $blessclass];
+# $ref = new_tie Pogo::Scalar [,$pogovar, $blessclass];
 sub new_tie {
-	my($class, $pogo, $blessclass) =@_;
+	my($class, $pogovar, $blessclass) =@_;
 	my $var;
-	unless( $pogo ) {
+	unless( $pogovar ) {
 		tie $var, $class;
-	} elsif( ref($pogo) eq 'Pogo' ) {
-		my $obj = new Pogo::Scalar $pogo;
-		$obj->set_class($blessclass) if $blessclass;
-		tie $var, $class, $obj;
-		bless \$var, $blessclass if $blessclass;
+	} elsif( my $tiedobj = Pogo::tied_object($pogovar) ) {
+		tie $var, $class, $class->new($tiedobj);
 	} else {
-		croak "Pogo object required";
+		croak "Pogo variable required";
+	}
+	if( $blessclass ) {
+		tied($var)->set_class($blessclass);
+		bless \$var, $blessclass;
 	}
 	\$var;
 }
@@ -213,39 +246,36 @@ sub TIESCALAR {
 	my($class, $obj) = @_;
 	my $self;
 	unless( $obj ) {
-		$self = new Pogo::Scalar;
-	} elsif( ref($obj) eq 'Pogo::Scalar' ) {
+		$self = $class->new;
+	} elsif( ref($obj) eq $class ) {
 		$self = $obj;
 	} else {
-		croak "Pogo::Scalar object required";
+		croak "$class object required";
 	}
 	$self;
 }
-sub FETCH { wrap($_[0]->get); }
-sub STORE { $_[0]->set(strip($_[1])); }
+sub FETCH { Pogo::wrap($_[0]->get); }
+sub STORE { $_[0]->set(Pogo::strip($_[1])); }
 
 package Pogo::Array;
 use Carp;
 use strict;
 use vars qw(@ISA);
 @ISA = qw(Pogo::Var);
-BEGIN {
-	*wrap = \&Pogo::wrap;
-	*strip = \&Pogo::strip;
-}
-# $ref = new_tie Pogo::Array [,$size, $pogo, $blessclass];
+# $ref = new_tie Pogo::Array [,$size, $pogovar, $blessclass];
 sub new_tie {
-	my($class, $size, $pogo, $blessclass) = @_;
+	my($class, $size, $pogovar, $blessclass) = @_;
 	my @var;
-	unless( $pogo ) {
+	unless( $pogovar ) {
 		tie @var, $class, $size;
-	} elsif( ref($pogo) eq 'Pogo' ) {
-		my $obj = new Pogo::Array $size, $pogo;
-		$obj->set_class($blessclass) if $blessclass;
-		tie @var, $class, $obj;
-		bless \@var, $blessclass if $blessclass;
+	} elsif( my $tiedobj = Pogo::tied_object($pogovar) ) {
+		tie @var, $class, $class->new($size, $tiedobj);
 	} else {
-		croak "Pogo object required";
+		croak "Pogo variable required";
+	}
+	if( $blessclass ) {
+		tied(@var)->set_class($blessclass);
+		bless \@var, $blessclass;
 	}
 	\@var;
 }
@@ -254,26 +284,26 @@ sub TIEARRAY {
 	my($class, $size_or_obj) = @_;
 	my $self;
 	unless( $size_or_obj ) {
-		$self = new Pogo::Array;
+		$self = $class->new;
 	} elsif( $size_or_obj =~ /^\d+$/ ) {
-		$self = new Pogo::Array($size_or_obj);
-	} elsif( ref($size_or_obj) eq 'Pogo::Array' ) {
+		$self = $class->new($size_or_obj);
+	} elsif( ref($size_or_obj) eq $class ) {
 		$self = $size_or_obj;
 	} else {
-		croak "size or Pogo::Array object required";
+		croak "size or $class object required";
 	}
 	$self;
 }
-sub FETCH  {  wrap($_[0]->get($_[1])); }
-sub STORE  {  $_[0]->set($_[1], strip($_[2])); }
+sub FETCH  {  Pogo::wrap($_[0]->get($_[1])); }
+sub STORE  {  $_[0]->set($_[1], Pogo::strip($_[2])); }
 sub FETCHSIZE {  $_[0]->get_size; }
 sub STORESIZE {  $_[0]->set_size($_[1]); }
 sub EXTEND {  $_[0]->set_size($_[1]); }
 sub CLEAR  {  $_[0]->clear; }
-sub PUSH   {  $_[0]->push(strip($_[1])); }
-sub POP    {  wrap($_[0]->pop); }
-sub SHIFT  {  wrap($_[0]->remove(0)); }
-sub UNSHIFT {  $_[0]->insert(0, strip($_[1])); }
+sub PUSH   {  $_[0]->push(Pogo::strip($_[1])); }
+sub POP    {  Pogo::wrap($_[0]->pop); }
+sub SHIFT  {  Pogo::wrap($_[0]->remove(0)); }
+sub UNSHIFT {  $_[0]->insert(0, Pogo::strip($_[1])); }
 sub splice {
 	my($self, $pos, $len, @list) = @_;
 	my($alllen, @result);
@@ -283,34 +313,92 @@ sub splice {
 	$pos = $alllen if $pos > $alllen;
 	$len = 0 if $len < 0;
 	$len -= $pos + $len - $alllen if $pos + $len > $alllen;
-	while( $len-- > 0 ) { push @result, wrap($self->remove($pos)); }
-	for(reverse @list) { $self->insert($pos, strip($_)); }
-	@result;
+	while( $len-- > 0 ) { push @result, Pogo::wrap($self->remove($pos)); }
+	for(reverse @list) { $self->insert($pos, Pogo::strip($_)); }
+	\@result;
 }
-sub SPLICE {  $_[0]->call(\&splice, \@_); }
+sub SPLICE { @{$_[0]->call(\&splice, \@_)}; }
+# raw utility subroutines
+sub getvalues { @{$_[0]->call(\&_getvalues, \@_)}; }
+sub _getvalues {
+	my $self = shift;
+	my @result = $self->get_size ? map {$self->get($_)} (0..$self->get_size-1) :
+		();
+	\@result;
+}
+sub exists { $_[0]->call(\&_exists, \@_); }
+sub _exists {
+	my($self, $value) = @_;
+	return unless defined $value;
+	return unless $self->get_size;
+	if( UNIVERSAL::isa($value, 'Pogo::Var') ) {
+		for(0..$self->get_size-1) {
+			return 1 if $value->equal($self->get($_));
+		}
+	} else {
+		for(0..$self->get_size-1) {
+			return 1 if $value eq $self->get($_);
+		}
+	}
+}
+sub add { $_[0]->call(\&_add, \@_); }
+sub _add {
+	my($self, $value) = @_;
+	return unless defined $value;
+	return if $self->_exists($value);
+	$self->push($value);
+	1;
+}
+sub delete { $_[0]->call(\&_delete, \@_); }
+sub _delete {
+	my($self, $value) = @_;
+	return unless defined $value;
+	return unless $self->get_size;
+	if( UNIVERSAL::isa($value, 'Pogo::Var') ) {
+		for(0..$self->get_size-1) {
+			$self->remove($_),return $value if $value->equal($self->get($_));
+		}
+	} else {
+		for(0..$self->get_size-1) {
+			$self->remove($_),return $value if $value eq $self->get($_);
+		}
+	}
+}
+
+package Pogo::Harray;
+use Carp;
+use strict;
+use vars qw(@ISA);
+@ISA = qw(Pogo::Array);
+sub FETCH  { 
+	my($self, $arg) = @_;
+	my $class;
+	if( $arg == 0 && ($class = $self->get_class) && $class->can('FIELDHASH') ) {
+		$class->FIELDHASH;
+	} else {
+		Pogo::wrap($self->get($arg)); 
+	}
+}
 
 package Pogo::Hash;
 use Carp;
 use strict;
 use vars qw(@ISA);
 @ISA = qw(Pogo::Var);
-BEGIN {
-	*wrap = \&Pogo::wrap;
-	*strip = \&Pogo::strip;
-}
-# $ref = new_tie Pogo::Hash [,$size, $pogo, $blessclass];
+# $ref = new_tie Pogo::Hash [,$size, $pogovar, $blessclass];
 sub new_tie {
-	my($class, $size, $pogo, $blessclass) = @_;
+	my($class, $size, $pogovar, $blessclass) = @_;
 	my %var;
-	unless( $pogo ) {
+	unless( $pogovar ) {
 		tie %var, $class, $size;
-	} elsif( ref($pogo) eq 'Pogo' ) {
-		my $obj = new Pogo::Hash $size, $pogo;
-		$obj->set_class($blessclass) if $blessclass;
-		tie %var, $class, $obj;
-		bless \%var, $blessclass if $blessclass;
+	} elsif( my $tiedobj = Pogo::tied_object($pogovar) ) {
+		tie %var, $class, $class->new($size, $tiedobj);
 	} else {
-		croak "Pogo object required";
+		croak "Pogo variable required";
+	}
+	if( $blessclass ) {
+		tied(%var)->set_class($blessclass);
+		bless \%var, $blessclass;
 	}
 	\%var;
 }
@@ -319,94 +407,68 @@ sub TIEHASH {
 	my($class, $size_or_obj) = @_;
 	my $self;
 	unless( $size_or_obj ) {
-		$self = new Pogo::Hash;
+		$self = $class->new;
 	} elsif( $size_or_obj =~ /^\d+$/ ) {
-		$self = new Pogo::Hash($size_or_obj);
-	} elsif( ref($size_or_obj) eq 'Pogo::Hash' ) {
+		$self = $class->new($size_or_obj);
+	} elsif( ref($size_or_obj) eq $class ) {
 		$self = $size_or_obj;
 	} else {
-		croak "size or Pogo::Hash object required";
+		croak "size or $class object required";
 	}
 	$self;
 }
-sub FETCH  { wrap($_[0]->get($_[1])); }
-sub STORE  { $_[0]->set($_[1], strip($_[2])); }
+sub FETCH  { Pogo::wrap($_[0]->get($_[1])); }
+sub STORE  { $_[0]->set($_[1], Pogo::strip($_[2])); }
 sub EXISTS { $_[0]->exists($_[1]); }
 sub DELETE { $_[0]->remove($_[1]); }
 sub CLEAR  { $_[0]->clear; }
 sub FIRSTKEY { $_[0]->first_key; }
 sub NEXTKEY  { $_[0]->next_key($_[1]); }
+# raw utility subroutines
+sub getkeys { @{$_[0]->call(\&_getkeys, \@_)}; }
+sub _getkeys {
+	my $self = shift;
+	my @result;
+	for(my $key = $self->first_key; defined $key; $key = $self->next_key($key)){
+		push @result, $key;
+	}
+	\@result;
+}
+sub getvalues { @{$_[0]->call(\&_getvalues, \@_)}; }
+sub _getvalues {
+	my $self = shift;
+	my @result;
+	for(my $key = $self->first_key; defined $key; $key = $self->next_key($key)){
+		push @result, $self->get($key);
+	}
+	\@result;
+}
 
 package Pogo::Htree;
 use Carp;
 use strict;
 use vars qw(@ISA);
-@ISA = qw(Pogo::Var);
-BEGIN {
-	*wrap = \&Pogo::wrap;
-	*strip = \&Pogo::strip;
-}
-# $ref = new_tie Pogo::Htree [,$size, $pogo, $blessclass];
-sub new_tie {
-	my($class, $size, $pogo, $blessclass) = @_;
-	my %var;
-	unless( $pogo ) {
-		tie %var, $class, $size;
-	} elsif( ref($pogo) eq 'Pogo' ) {
-		my $obj = new Pogo::Htree $size, $pogo;
-		$obj->set_class($blessclass) if $blessclass;
-		tie %var, $class, $obj;
-		bless \%var, $blessclass if $blessclass;
-	} else {
-		croak "Pogo object required";
-	}
-	\%var;
-}
-# tie %hash, 'Pogo::Htree' [,$size_or_obj];
-sub TIEHASH {
-	my($class, $size_or_obj) = @_;
-	my $self;
-	unless( $size_or_obj ) {
-		$self = new Pogo::Htree;
-	} elsif( $size_or_obj =~ /^\d+$/ ) {
-		$self = new Pogo::Htree($size_or_obj);
-	} elsif( ref($size_or_obj) eq 'Pogo::Htree' ) {
-		$self = $size_or_obj;
-	} else {
-		croak "size or Pogo::Htree object required";
-	}
-	$self;
-}
-sub FETCH  { wrap($_[0]->get($_[1])); }
-sub STORE  { $_[0]->set($_[1], strip($_[2])); }
-sub EXISTS { $_[0]->exists($_[1]); }
-sub DELETE { $_[0]->remove($_[1]); }
-sub CLEAR  { $_[0]->clear; }
-sub FIRSTKEY { $_[0]->first_key; }
-sub NEXTKEY  { $_[0]->next_key($_[1]); }
+@ISA = qw(Pogo::Hash);
 
 package Pogo::Btree;
 use Carp;
 use strict;
 use vars qw(@ISA);
-@ISA = qw(Pogo::Var);
-BEGIN {
-	*wrap = \&Pogo::wrap;
-	*strip = \&Pogo::strip;
-}
-# $ref = new_tie Pogo::Btree [, $pogo, $blessclass];
+@ISA = qw(Pogo::Hash);
+# $ref = new_tie Pogo::Btree [, $pogovar, $blessclass];
 sub new_tie {
-	my($class, $pogo, $blessclass) = @_;
+	my($class, $pogovar, $blessclass) = @_;
 	my %var;
-	unless( $pogo ) {
+	unless( $pogovar ) {
 		tie %var, $class;
-	} elsif( ref($pogo) eq 'Pogo' ) {
-		my $obj = new Pogo::Btree $pogo;
-		$obj->set_class($blessclass) if $blessclass;
-		tie %var, $class, $obj;
-		bless \%var, $blessclass if $blessclass;
+	} elsif( my $tiedobj = Pogo::tied_object($pogovar) ) {
+		tie %var, $class, $class->new($tiedobj);
 	} else {
-		croak "Pogo object required";
+		croak "Pogo variable required";
+	}
+	if( $blessclass ) {
+		tied(%var)->set_class($blessclass);
+		bless \%var, $blessclass;
 	}
 	\%var;
 }
@@ -415,67 +477,75 @@ sub TIEHASH {
 	my($class, $obj) = @_;
 	my $self;
 	unless( $obj ) {
-		$self = new Pogo::Btree;
-	} elsif( ref($obj) eq 'Pogo::Btree' ) {
+		$self = $class->new;
+	} elsif( ref($obj) eq $class ) {
 		$self = $obj;
 	} else {
-		croak "Pogo::Btree object required";
+		croak "$class object required";
 	}
 	$self;
 }
-sub FETCH  { wrap($_[0]->get($_[1])); }
-sub STORE  { $_[0]->set($_[1], strip($_[2])); }
-sub EXISTS { $_[0]->exists($_[1]); }
-sub DELETE { $_[0]->remove($_[1]); }
-sub CLEAR  { $_[0]->clear; }
-sub FIRSTKEY { $_[0]->first_key; }
-sub NEXTKEY  { $_[0]->next_key($_[1]); }
 
 package Pogo::Ntree;
 use Carp;
 use strict;
 use vars qw(@ISA);
+@ISA = qw(Pogo::Btree);
+
+package Pogo::SNArray;
+use Carp;
+use strict;
+use vars qw(@ISA);
 @ISA = qw(Pogo::Var);
-BEGIN {
-	*wrap = \&Pogo::wrap;
-	*strip = \&Pogo::strip;
-}
-# $ref = new_tie Pogo::Ntree [, $pogo, $blessclass];
+# $ref = new_tie Pogo::SNArray [,$size, $pogovar, $blessclass];
 sub new_tie {
-	my($class, $pogo, $blessclass) = @_;
-	my %var;
-	unless( $pogo ) {
-		tie %var, $class;
-	} elsif( ref($pogo) eq 'Pogo' ) {
-		my $obj = new Pogo::Ntree $pogo;
-		$obj->set_class($blessclass) if $blessclass;
-		tie %var, $class, $obj;
-		bless \%var, $blessclass if $blessclass;
+	my($class, $size, $pogovar, $blessclass) = @_;
+	my @var;
+	unless( $pogovar ) {
+		tie @var, $class, $size;
+	} elsif( my $tiedobj = Pogo::tied_object($pogovar) ) {
+		tie @var, $class, $class->new($size, $tiedobj);
 	} else {
-		croak "Pogo object required";
+		croak "Pogo variable required";
 	}
-	\%var;
+	if( $blessclass ) {
+		tied(@var)->set_class($blessclass);
+		bless \@var, $blessclass;
+	}
+	\@var;
 }
-# tie %hash, 'Pogo::Ntree' [,$obj];
-sub TIEHASH {
-	my($class, $obj) = @_;
+# tie @array, 'Pogo::SNArray' [,$size_or_obj];
+sub TIEARRAY { 
+	my($class, $size_or_obj) = @_;
 	my $self;
-	unless( $obj ) {
-		$self = new Pogo::Ntree;
-	} elsif( ref($obj) eq 'Pogo::Ntree' ) {
-		$self = $obj;
+	unless( $size_or_obj ) {
+		$self = $class->new;
+	} elsif( $size_or_obj =~ /^\d+$/ ) {
+		$self = $class->new($size_or_obj);
+	} elsif( ref($size_or_obj) eq $class ) {
+		$self = $size_or_obj;
 	} else {
-		croak "Pogo::Ntree object required";
+		croak "size or $class object required";
 	}
 	$self;
 }
-sub FETCH  { wrap($_[0]->get($_[1])); }
-sub STORE  { $_[0]->set($_[1], strip($_[2])); }
-sub EXISTS { $_[0]->exists($_[1]); }
-sub DELETE { $_[0]->remove($_[1]); }
-sub CLEAR  { $_[0]->clear; }
-sub FIRSTKEY { $_[0]->first_key; }
-sub NEXTKEY  { $_[0]->next_key($_[1]); }
+sub FETCH  {  $_[0]->get($_[1]); }
+sub STORE  {  $_[0]->set($_[2]); } # index $_[1] not used
+sub FETCHSIZE {  $_[0]->get_size; }
+sub STORESIZE {  $_[0]->set_size($_[1]); }
+sub EXTEND {  $_[0]->set_size($_[1]); }
+sub CLEAR  {  $_[0]->clear; }
+# raw utility subroutines
+sub getvalues { @{$_[0]->call(\&_getvalues, \@_)}; }
+sub _getvalues {
+	my $self = shift;
+	my @result = $self->get_size ? map {$self->get($_)} (0..$self->get_size-1) :
+		();
+	\@result;
+}
+sub exists { $_[0]->find($_[1]) >= 0; }
+sub add { $_[0]->ins($_[1]); }
+sub delete { $_[0]->del($_[1]); }
 
 package Pogo;
 
@@ -500,11 +570,11 @@ Pogo - Perl GOODS interface
   $value = $root->{key1};         # $value is "string"
   
   $root->{key2} = [1,2,3];        # store a array into the database
-  $arrayref = $root->{key1};      # get a reference to array in the database
+  $arrayref = $root->{key1};      # get a reference to the array in the database
   $value = $root->{key2}->[0];    # $value is 1
   
   $root->{key3} = {a=>1,b=>2};    # store a hash into the database
-  $hashref = $root->{key3};       # get a reference to hash in the database
+  $hashref = $root->{key3};       # get a reference to the hash in the database
   $value = $root->{key3}->{b};    # $value is 2
   
   $root->{key4} = new Pogo::Btree;# make a B-tree hash
@@ -519,7 +589,7 @@ Pogo - Perl GOODS interface
 
 =head1 DESCRIPTION
 
-=head2 Basic feature
+=head2 Overview
 
 Pogo is a Perl interface of GOODS (Generic Object Oriented Database System).
 Pogo maps Perl's scalars, arrays, hashes and objects directly to the database 
@@ -528,8 +598,9 @@ objects. Pogo has the data types as follows.
   - scalar
   - array
   - hash
-  - H-tree (hash that hash entry table is placed as B-tree)
   - B-tree
+  - H-tree (hash that hash entry table is placed as B-tree)
+  - N-tree (same as B-tree but key is treated as number)
 
 The value of a scalar data or an element of a collection type data is a 
 string or a reference to another data. Pogo uses Perl's tieing mechanism and
@@ -584,7 +655,7 @@ sending commands to the goodsrv. To start goodsrv with test.cfg, type:
   startgoodsrv test &
 
 This goodsrv's outputs are saved in test.goodsrv.log.
-And to terminate goodsrv, type:
+And to terminate the goodsrv, type:
 
   cmdgoodsrv test exit
 
@@ -870,6 +941,10 @@ If a Pogo object does not connect to the GOODS server yet, this method does it.
 This disconnects to the GOODS server. You may not use this method, because it is 
 called when the Pogo object is destroyed automatically.
 
+=item $pogo->opened
+
+Returns 1 for already opened $pogo or 0 for not opened.
+
 =item $pogo->root
 
 This makes and returns a Pogo::Btree object corresponding to the root B-tree.
@@ -894,89 +969,100 @@ This ends the transacion which was started by Pogo::begin_transaction.
 =item $obj = Pogo::Scalar->new [pogoobj]
 
 Class method. Makes and returns a Pogo::Scalar object. 
-If Pogo object pogoobj is specified, the created object is stored the database.
+If Pogo::* object pogoobj is specified and it is already attached to a database,
+the created object is attached to the same database.
 
-=item $scalarref = Pogo::Scalar->new_tie [pogoobj [,class]]
+=item $scalarref = Pogo::Scalar->new_tie [pogovar ,class]
 
 Class method. Makes a Pogo::Scalar object and ties a scalar to it and returns 
 a reference to the tied scalar. 
-If Pogo object pogoobj is specified, the created object is stored the database. 
+If reference variable pogovar is specified and it is already attached to a 
+database, the created object is attached to the same database.
 If class name class is specified, the reference is blessed by the class.
 
-=item $obj = Pogo::Array->new [size [,pogoobj]]
+=item $obj = Pogo::Array->new [size ,pogoobj]
 
 Class method. Makes and returns a Pogo::Array object of specified size. 
-If size defaults, 1 is used. 
-If Pogo object pogoobj is specified, the created object is stored the database.
+If size defaults, 0 is used. 
+If Pogo::* object pogoobj is specified and it is already attached to a database,
+the created object is attached to the same database.
 
-=item $arrayref = Pogo::Array->new_tie [size [,pogoobj [,class]]]
+=item $arrayref = Pogo::Array->new_tie [size ,pogovar ,class]
 
 Class method. Makes a Pogo::Array object of specified size and ties a array to 
 it and returns a reference to the tied array.
-If size defaults, 1 is used.
-If Pogo object pogoobj is specified, the created object is stored the database. 
+If size defaults, 0 is used.
+If reference variable pogovar is specified and it is already attached to a 
+database, the created object is attached to the same database.
 If class name class is specified, the reference is blessed by the class.
 
-=item $obj = Pogo::Hash->new [size [,pogoobj]]
+=item $obj = Pogo::Hash->new [size ,pogoobj]
 
 Class method. Makes and returns a Pogo::Hash object of specified hash 
 entry table size. 
 If size defaults, 256 is used.
-If Pogo object pogoobj is specified, the created object is stored the database.
+If Pogo::* object pogoobj is specified and it is already attached to a database,
+the created object is attached to the same database.
 
-=item $hashref = Pogo::Hash->new_tie [size [,pogoobj [,class]]]
+=item $hashref = Pogo::Hash->new_tie [size ,pogovar ,class]
 
 Class method. Makes a Pogo::Hash object of specified hash 
 entry table size and ties a hash to it and returns a reference to the tied
 hash. If size defaults, 256 is used.
-If Pogo object pogoobj is specified, the created object is stored the database. 
+If reference variable pogovar is specified and it is already attached to a 
+database, the created object is attached to the same database.
 If class name class is specified, the reference is blessed by the class.
 
-=item $obj = Pogo::Htree->new [size [,pogoobj]]
+=item $obj = Pogo::Htree->new [size ,pogoobj]
 
 Class method. Makes and returns a Pogo::Htree object of specified hash 
 entry table size. 
 If size defaults, 65536 is used.
-If Pogo object pogoobj is specified, the created object is stored the database.
+If Pogo::* object pogoobj is specified and it is already attached to a database,
+the created object is attached to the same database.
 
-=item $hashref = Pogo::Htree->new_tie [size [,pogoobj [,class]]]
+=item $hashref = Pogo::Htree->new_tie [size ,pogovar ,class]
 
 Class method. Makes a Pogo::Htree object of specified hash 
 entry table size and ties a hash to it and returns a reference to the tied
 hash. If size defaults, 65536 is used.
-If Pogo object pogoobj is specified, the created object is stored the database. 
+If reference variable pogovar is specified and it is already attached to a 
+database, the created object is attached to the same database.
 If class name class is specified, the reference is blessed by the class.
 
 =item $obj = Pogo::Btree->new [pogoobj]
 
 Class method. Makes and returns a Pogo::Btree object. 
-If Pogo object pogoobj is specified, the created object is stored the database.
+If Pogo::* object pogoobj is specified and it is already attached to a database,
+the created object is attached to the same database.
 
-=item $hashref = Pogo::Btree->new_tie [pogoobj [,class]]
+=item $hashref = Pogo::Btree->new_tie [pogovar ,class]
 
 Class method. Makes a Pogo::Btree object and ties a hash to it and returns a 
 reference to the tied hash.
-If Pogo object pogoobj is specified, the created object is stored the database. 
+If reference variable pogovar is specified and it is already attached to a 
+database, the created object is attached to the same database.
 If class name class is specified, the reference is blessed by the class.
 
 =item $obj = Pogo::Ntree->new [pogoobj]
 
 Class method. Makes and returns a Pogo::Ntree object. 
-If Pogo object pogoobj is specified, the created object is stored the database.
+If Pogo::* object pogoobj is specified and it is already attached to a database,
+the created object is attached to the same database.
 
-=item $hashref = Pogo::Ntree->new_tie [pogoobj [,class]]
+=item $hashref = Pogo::Ntree->new_tie [pogovar ,class]
 
 Class method. Makes a Pogo::Ntree object and ties a hash to it and returns a 
 reference to the tied hash.
-If Pogo object pogoobj is specified, the created object is stored the database. 
+If reference variable pogovar is specified and it is already attached to a 
+database, the created object is attached to the same database.
 If class name class is specified, the reference is blessed by the class.
 
 NOTE: An object created by these Pogo::*::new and Pogo::*::new_tie is on the 
-memory unless Pogo object is specified as an argument, not yet persistent. When 
-it is assigned into a existing persistent data in a database, it becomes 
-persistent. When Pogo object is specified as an argument, the gotten object is
-stored in the database, but it is not yet persistent too. When it is refered by
-a existing persitent data in the database, it becomes persistent.
+memory, not yet persistent. When it is refered by a existing persistent 
+data in a database, it becomes persistent. When Pogo object is specified as 
+an argument, the gotten object is attached to the database, but it is not yet 
+persistent too. 
 
 =back
 
@@ -1036,23 +1122,52 @@ timeout.
 
 If the timeout seconds defaults, it waits forever.
 
+=item Pogo::get_root_tie
+
+This function takes one reference argument which refer to a database data and 
+returns the hash reference to the root B-tree in the database.
+
+  $root = Pogo::get_root_tie($pogovar);
+
 =back
 
-=head2 Raw methods
+=head2 Low level (non-tie) interface
 
-These methods below are used by the tie interaface internally.
+The tie interface of Pogo is very convenient. But it causes much overheads. If 
+you want to construct large and complex database application by Pogo, using 
+low level (non-tie) interface is recommended.
+
+For exmple, as follows by tie interface:
+
+  $root = $pogo->root_tie;    # $root is a hash reference
+  $root->{key} = "value";
+  $value = $root->{key};      # $value is "value"
+
+It is same as follows by low level interface:
+
+  $root = $pogo->root;        # $root is a Pogo::Btree object
+  $root->set(key => "value");
+  $value = $root->get('key'); # $value is "value"
+
+=head2 Low level classes and methods
+
+These low level classes and methods below are used by tie interaface 
+internally and you can use its directly.
 
 =over 4
 
 =item Pogo::Var
 
-Pogo::Var is a abstract base class of all Pogo::* classes below. No Pogo::Var object is available.
+Pogo::Var is a abstract base class of all Pogo::* classes below. No Pogo::Var 
+object is available.
 
   Pogo::Var::get_class
   Pogo::Var::set_class
   Pogo::Var::begin_transaction
   Pogo::Var::abort_transaction
   Pogo::Var::end_transaction
+  Pogo::Var::root
+  Pogo::Var::root_tie
   Pogo::Var::call
   Pogo::Var::equal
   Pogo::Var::wait_modification
@@ -1095,7 +1210,9 @@ Pogo::Var is a abstract base class of all Pogo::* classes below. No Pogo::Var ob
   Pogo::Htree::first_key
   Pogo::Htree::next_key
 
-=item Pogo::Btree
+=item Pogo::Btree, Pogo::Ntree
+
+These methods below are same in Pogo::Ntree.
 
   Pogo::Btree::get
   Pogo::Btree::set
@@ -1110,9 +1227,35 @@ Pogo::Var is a abstract base class of all Pogo::* classes below. No Pogo::Var ob
 
 =back
 
+=head2 Deriving low level classes and hooking methods 
+
+You can derive low level classes and override some methods. Instead of entire 
+overriding, Pogo provides a hook mechanism for low level methods.
+
+For example if you want to hook Pogo::Array::set method, do:
+
+  # MyArray.pm
+  package MyArray;
+  @ISA = qw(Pogo::Array);
+  %HOOK = (set => \&set_hook);  # hook set() method by set_hook()
+  sub set_hook {
+    my($self, $idx, $value) = @_;
+    do_something($self, $idx, $value);
+    1;     # if returns false, original method not called
+  }
+  ...
+  1;
+
+Then do:
+
+  use MyArray;
+  $obj = new MyArray;
+  $obj->set(0, "value"); # set_hook($obj, 0, "value") and Pogo::Array::set($obj, 0, "value")
+
+
 =head1 AUTHOR
 
-Sey Nakajima <sey@jkc.co.jp>
+Sey Nakajima <nakajima@netstock.co.jp>
 
 =head1 SEE ALSO
 

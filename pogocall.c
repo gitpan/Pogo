@@ -4,12 +4,12 @@
 #include <XSUB.h>
 #include "pogocall.h"
 
-int _pogo_call_sv(void* func, void* argref) {
+callresult _pogo_call_sv(void* func, void* argref) {
 	SV *	codesv;
 	SV *	argvref;
 	AV *	av;
 	I32		j, ac, outs;
-	int		result;
+	callresult	result, tmp;
 	dSP;
 	codesv = (SV*)func;
 	argvref = (SV*)argref;
@@ -25,9 +25,16 @@ int _pogo_call_sv(void* func, void* argref) {
 		}
 	}
 	PUTBACK;
-	outs = perl_call_sv(codesv, G_SCALAR);
+	outs = perl_call_sv(codesv, GIMME);
 	SPAGAIN;
-	result = outs == 1 ? POPi : 0;
+	result = (callresult)malloc(sizeof(void*) * (outs + 1));
+	tmp = result + outs;
+	*tmp = NULL;
+	for( j = 0; j < outs; j++ ) {
+		SV* tmpv = POPs;
+		SvREFCNT_inc(tmpv);
+		*(--tmp) = (void*)tmpv;
+	}
 	PUTBACK;
 	LEAVE;
 	return result;

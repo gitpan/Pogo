@@ -2,13 +2,15 @@ TYPEMAP
 
 nstring *	NSTRING
 Pvar *		PVARARG
-Pscalar *	PVAR
-Parray *	PVAR
-Phash *		PVAR
-Phtree *	PVAR
-Pbtree *	PVAR
-Pntree *	PVAR
+Pscalar *	PVARNEW
+Parray *	PVARNEW
+Phash *		PVARNEW
+Phtree *	PVARNEW
+Pbtree *	PVARNEW
+Pntree *	PVARNEW
+Psnarray *	PVARNEW
 Pogo *		POGO
+callresult	CALLRESULT
 
 OUTPUT
 
@@ -26,13 +28,25 @@ PVARARG
 		sv_setref_pv( $arg, _class, (void*)$var );
 	}
 
-PVAR
+PVARNEW
 	if( $var == NULL )	XSRETURN_UNDEF;
-	sv_setref_pv( $arg, $var->perl_class(), (void*)$var );
+	$var->set_pclass(CLASS);
+	sv_setref_pv( $arg, CLASS, (void*)$var );
 
 POGO
 	if( $var == NULL )	XSRETURN_UNDEF;
-	sv_setref_pv( $arg, $var->perl_class(), (void*)$var );
+	sv_setref_pv( $arg, CLASS, (void*)$var );
+
+CALLRESULT
+	sp -= items;
+	int outs = 0;
+	callresult tmp = $var;
+	while( *tmp != NULL ) {
+		XPUSHs(sv_2mortal((SV*)*(tmp++)));
+		outs++;
+	}
+	free($var);
+	XSRETURN(outs);
 
 INPUT
 
@@ -53,7 +67,7 @@ PVARARG
 		XSRETURN_UNDEF;
 	}
 
-PVAR
+PVARNEW
 	if( sv_isobject($arg) && sv_derived_from($arg, \"Pogo::Var\") ) {
 		$var = ($type)SvIV((SV*)SvRV( $arg ));
 	} else {

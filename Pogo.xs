@@ -32,13 +32,13 @@ Pvar::abort_transaction()
 void 
 Pvar::end_transaction()
 
-int
+callresult
 Pvar::_call(func, argref)
 	SV* func
 	SV* argref
 
 int
-Pvar::equal(var)
+Pvar::_equal(var)
 	Pvar* var
 
 int
@@ -48,11 +48,14 @@ Pvar::wait_modification(sec = 0)
 unsigned
 Pvar::object_id()
 
+Pvar*
+Pvar::root()
+
 MODULE = Pogo		PACKAGE = Pogo::Scalar		
 
 Pscalar*
-Pscalar::new(pogo = NULL)
-	Pogo* pogo
+Pscalar::new(pvar = NULL)
+	Pvar* pvar
 
 void
 Pscalar::DESTROY()
@@ -67,8 +70,8 @@ Pscalar::set(val)
 MODULE = Pogo		PACKAGE = Pogo::Array	
 
 Parray*
-Parray::new(size = 1, pogo = NULL)
-	Pogo* pogo
+Parray::new(size = 0, pvar = NULL)
+	Pvar* pvar
 	unsigned size
 
 void
@@ -112,8 +115,8 @@ Parray::remove(idx)
 MODULE = Pogo		PACKAGE = Pogo::Hash		
 
 Phash*
-Phash::new(size = 256, pogo = NULL)
-	Pogo* pogo
+Phash::new(size = 256, pvar = NULL)
+	Pvar* pvar
 	unsigned size
 
 void
@@ -149,8 +152,8 @@ Phash::next_key(key)
 MODULE = Pogo		PACKAGE = Pogo::Htree		
 
 Phtree*
-Phtree::new(size = 65536, pogo = NULL)
-	Pogo* pogo
+Phtree::new(size = 65536, pvar = NULL)
+	Pvar* pvar
 	unsigned size
 
 void
@@ -186,8 +189,8 @@ Phtree::next_key(key)
 MODULE = Pogo		PACKAGE = Pogo::Btree		
 
 Pbtree*
-Pbtree::new(pogo = NULL)
-	Pogo* pogo
+Pbtree::new(pvar = NULL)
+	Pvar* pvar
 
 void
 Pbtree::DESTROY()
@@ -233,8 +236,8 @@ Pbtree::find_key(key)
 MODULE = Pogo		PACKAGE = Pogo::Ntree		
 
 Pntree*
-Pntree::new(pogo = NULL)
-	Pogo* pogo
+Pntree::new(pvar = NULL)
+	Pvar* pvar
 
 void
 Pntree::DESTROY()
@@ -277,14 +280,73 @@ char*
 Pntree::find_key(key)
 	char* key
 
+MODULE = Pogo		PACKAGE = Pogo::SNArray	
+
+Psnarray*
+Psnarray::new(size = 0, pvar = NULL)
+	Pvar* pvar
+	unsigned size
+
+void
+Psnarray::DESTROY()
+
+int
+Psnarray::get(idx)
+	unsigned idx
+
+int
+Psnarray::find(val)
+	int val
+
+int
+Psnarray::findGE(val)
+	int val
+
+void
+Psnarray::set(val)
+	int val
+
+void
+Psnarray::ins(val)
+	int val
+
+void
+Psnarray::del(val)
+	int val
+
+unsigned
+Psnarray::get_size()
+
+void
+Psnarray::set_size(size)
+	unsigned size
+
+void
+Psnarray::clear()
+
 MODULE = Pogo		PACKAGE = Pogo		
 
 Pogo*
 Pogo::new(cfgfile = NULL)
 	char* cfgfile
+	CODE:
+#ifdef GLOBALDB
+	RETVAL = Pogo::POGOOBJ();
+	if( cfgfile )
+		RETVAL->open(cfgfile);
+#else
+	RETVAL = new Pogo(cfgfile);
+#endif
+	OUTPUT:
+		RETVAL
 
 void
 Pogo::DESTROY()
+	CODE:
+#ifdef GLOBALDB
+#else
+	delete THIS;
+#endif
 
 int
 Pogo::open(cfgfile)
@@ -293,7 +355,10 @@ Pogo::open(cfgfile)
 void
 Pogo::close()
 
-Pbtree*
+int
+Pogo::opened()
+
+Pvar*
 Pogo::root()
 
 void
@@ -304,4 +369,10 @@ Pogo::abort_transaction()
 
 void
 Pogo::end_transaction()
+
+void
+Pogo::initialize()
+
+BOOT:
+Pogo::initialize();
 

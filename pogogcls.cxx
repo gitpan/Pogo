@@ -268,6 +268,54 @@ ref<set_member> eNtree::findGE(const char* str) const {
 	size_t len = strlen(str); 
 	return findGE(str, len, set_member_numkey::str2key(str, len)); 
 }
+// p must be a NULL or malloc'ed or realloc'ed pointer
+char* eNtree::next_key(char*& p, const char* key) const {
+	int len;
+	
+	ref<set_member> m = find(key);
+	if( m != NULL )
+		m = m->next;
+	if( m != NULL )	len = m->getKeyLength() + 1;
+	else			len = 1;
+	if( p == NULL )	p = (char*)malloc(len);
+	else			p = (char*)realloc(p,len);
+	if( m != NULL )	m->copyKeyTo(p, len);
+	else			*p = '\0';
+	if( m != NULL )	return p;
+	else			return NULL;
+}
+
+// p must be a NULL or malloc'ed or realloc'ed pointer
+char* eNtree::prev_key(char*& p, const char* key) const {
+	int len;
+	
+	ref<set_member> m = find(key);
+	if( m != NULL )
+		m = m->prev;
+	if( m != NULL )	len = m->getKeyLength() + 1;
+	else			len = 1;
+	if( p == NULL )	p = (char*)malloc(len);
+	else			p = (char*)realloc(p,len);
+	if( m != NULL )	m->copyKeyTo(p, len);
+	else			*p = '\0';
+	if( m != NULL )	return p;
+	else			return NULL;
+}
+
+// p must be a NULL or malloc'ed or realloc'ed pointer
+char* eNtree::find_key(char*& p, const char* key) const {
+	int len;
+	
+	ref<set_member> m = findGE(key);
+	if( m != NULL )	len = m->getKeyLength() + 1;
+	else			len = 1;
+	if( p == NULL )	p = (char*)malloc(len);
+	else			p = (char*)realloc(p,len);
+	if( m != NULL )	m->copyKeyTo(p, len);
+	else			*p = '\0';
+	if( m != NULL )	return p;
+	else			return NULL;
+}
 void	eNtree::insert(char const* key, ref<object> obj) {
 	B_tree::insert(set_member_numkey::create(obj, key));
 }
@@ -446,3 +494,64 @@ field_descriptor& eTime::describe_components()
 
 REGISTER(eTime, object, pessimistic_repeatable_read_scheme);
 
+//--------------------------------------------------------------------
+int	SortedNumArray::find(int4 num) const { 
+	int begin, end, mid;
+	if( used == 0 )
+		return -1;
+	begin = 0;
+	end = used - 1;
+	while(1) {
+		mid = begin + (end - begin) / 2;
+		if( array[mid] == num ) {
+			return mid;
+		} else if( array[mid] > num ) {
+			if( array[begin] > num )	return -1;
+			if( mid > begin )	end = mid - 1;
+			else	return -1;
+		} else {
+			if( array[end] < num )	return -1;
+			if( mid < end )	begin = mid + 1;
+			else	return -1;
+		}
+	}
+}
+int	SortedNumArray::find_pos(int4 num, int ins = 0) const { 
+	int begin, end, mid;
+	if( used == 0 ) {
+		return 0;
+	} else {
+		begin = 0;
+		end = used - 1;
+		while(1) {
+			mid = begin + (end - begin) / 2;
+			if( array[mid] == num )
+				return ins ? -1 : mid;
+			else if( array[mid] > num ) {
+				if( array[begin] > num )	return begin;
+				if( mid > begin )	end = mid - 1;
+				else	return begin;
+			} else {
+				if( array[end] < num )	return end + 1;
+				if( mid < end )	begin = mid + 1;
+				else	return end + 1;
+			}
+		}
+	}
+}
+void SortedNumArray::ins(int4 num) {
+	int inspos = find_pos(num, 1);
+	if( inspos >= 0 )
+		insert(inspos, num);
+}
+void SortedNumArray::del(int4 num) {
+	int pos = find(num);
+	if( pos >= 0 )
+		remove(pos);
+}
+
+field_descriptor& SortedNumArray::describe_components() {
+	return NO_FIELDS;
+}
+
+REGISTER(SortedNumArray, ArrayOfInt, pessimistic_repeatable_read_scheme);

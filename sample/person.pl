@@ -1,8 +1,8 @@
 #!/usr/local/bin/perl
 # Sample script for PogoLink
 # 2000 Sey Nakajima <sey@jkc.co.jp>
+use Person;
 use Pogo;
-use PogoLink;
 use strict vars;
 use vars qw(@Cmds0 @Cmds1 @Cmds2 $AUTOLOAD);
 
@@ -34,7 +34,7 @@ sub main {
 		my($func, @args) = split(/\s+/,$line);
 		last if $func eq 'exit';
 		if( grep($func eq $_, @Cmds0) ) {
-			unshift @args, $pogo, $persons;
+			unshift @args, $root, $persons;
 		} else {
 			@args = map $persons->{$_}, @args;
 			print("no such name\n"),next if grep !$_, @args;
@@ -62,19 +62,19 @@ END
 }
 
 sub list {
-	my($pogo, $persons) = @_;
+	my($root, $persons) = @_;
 	my @name = keys %{$persons};
 	print "@name\n" if @name;
 }
 sub add_man {
-	my($pogo, $persons, $name) = @_;
+	my($root, $persons, $name) = @_;
 	return if exists $persons->{$name};
-	$persons->{$name} = new Man $pogo, $name;
+	$persons->{$name} = new Man $root, $name;
 }
 sub add_woman {
-	my($pogo, $persons, $name) = @_;
+	my($root, $persons, $name) = @_;
 	return if exists $persons->{$name};
-	$persons->{$name} = new Woman $pogo, $name;
+	$persons->{$name} = new Woman $root, $name;
 }
 sub AUTOLOAD {
 	my($person1, $person2) = @_;
@@ -87,134 +87,5 @@ sub AUTOLOAD {
 	} else {
 		print "no such command\n";
 	}
-}
-
-package Person;
-sub new {
-	my($class, $pogo, $name) = @_;
-	my $self = new_tie Pogo::Hash 8, $pogo, $class;
-	%$self = (
-		NAME     => $name,
-		FATHER   => new PogoLink::Scalar($self, 'Man',    'CHILDREN'),
-		MOTHER   => new PogoLink::Scalar($self, 'Woman',  'CHILDREN'),
-		FRIENDS  => new PogoLink::Btree ($self, 'Person', 'FRIENDS', 'NAME'),
-	);
-	$self;
-}
-sub name {
-	my $self = shift;
-	$self->{NAME};
-}
-sub add_child {
-	my($self, $person) = @_;
-	$self->{CHILDREN}->add($person);
-}
-sub del_child {
-	my($self, $person) = @_;
-	$self->{CHILDREN}->del($person);
-}
-sub children {
-	my $self = shift;
-	$self->{CHILDREN}->getlist;
-}
-sub father {
-	my $self = shift;
-	$self->{FATHER}->get;
-}
-sub add_father {
-	my($self, $person) = @_;
-	$self->{FATHER}->add($person);
-}
-sub del_father {
-	my($self, $person) = @_;
-	$self->{FATHER}->del($person);
-}
-sub mother {
-	my $self = shift;
-	$self->{MOTHER}->get;
-}
-sub add_mother {
-	my($self, $person) = @_;
-	$self->{MOTHER}->add($person);
-}
-sub del_mother {
-	my($self, $person) = @_;
-	$self->{MOTHER}->del($person);
-}
-sub add_friend {
-	my($self, $person) = @_;
-	$self->{FRIENDS}->add($person);
-}
-sub del_friend {
-	my($self, $person) = @_;
-	$self->{FRIENDS}->del($person);
-}
-sub friends {
-	my $self = shift;
-	$self->{FRIENDS}->getlist;
-}
-
-package Man;
-BEGIN { @Man::ISA = qw(Person); }
-sub new {
-	my($class, $pogo, $name) = @_;
-	my $self = $class->SUPER::new($pogo, $name);
-	$self->{CHILDREN} = new PogoLink::Array ($self, 'Person', 'FATHER');
-	$self->{WIFE}     = new PogoLink::Scalar($self, 'Woman', 'HUS');
-	$self;
-}
-sub show {
-	my $self = shift;
-	print "Father : ",$self->father->name,"\n" if $self->father;
-	print "Mother : ",$self->mother->name,"\n" if $self->mother;
-	print "Wife   : ",$self->wife->name,"\n" if $self->wife;
-	print "Children : ",join(",",map($_->name,$self->children)),"\n" 
-		if $self->children;
-	print "Friends  : ",join(",",map($_->name,$self->friends)),"\n"
-		if $self->friends;
-}
-sub wife {
-	my $self = shift;
-	$self->{WIFE}->get;
-}
-sub add_wife {
-	my($self, $person) = @_;
-	$self->{WIFE}->add($person);
-}
-sub del_wife {
-	my($self, $person) = @_;
-	$self->{WIFE}->del($person);
-}
-
-package Woman;
-BEGIN { @Woman::ISA = qw(Person); }
-sub new {
-	my($class, $pogo, $name) = @_;
-	my $self = $class->SUPER::new($pogo, $name);
-	$self->{CHILDREN} = new PogoLink::Array ($self, 'Person', 'MOTHER');
-	$self->{HUS}      = new PogoLink::Scalar($self, 'Man', 'WIFE');
-	$self;
-}
-sub show {
-	my $self = shift;
-	print "Father : ",$self->father->name,"\n" if $self->father;
-	print "Mother : ",$self->mother->name,"\n" if $self->mother;
-	print "Hus    : ",$self->hus->name,"\n" if $self->hus;
-	print "Children : ",join(",",map($_->name,$self->children)),"\n" 
-		if $self->children;
-	print "Friends  : ",join(",",map($_->name,$self->friends)),"\n"
-		if $self->friends;
-}
-sub hus {
-	my $self = shift;
-	$self->{HUS}->get;
-}
-sub add_hus {
-	my($self, $person) = @_;
-	$self->{HUS}->add($person);
-}
-sub del_hus {
-	my($self, $person) = @_;
-	$self->{HUS}->del($person);
 }
 

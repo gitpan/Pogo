@@ -2,15 +2,20 @@
 # browse - Pogo database browser
 # 1999 Sey Nakajima <sey@jkc.co.jp>
 use Pogo;
+use PogoLink;
+use Getopt::Std;
 use strict;
+use vars qw($opt_m);
 
 $| = 1;
+getopts 'm:';
+require "$opt_m.pm" if $opt_m;
 my $Cfgfile = shift || usage();
 my(%Data, %Parent);
 main($Cfgfile);
 
 sub usage {
-	print "usage: $0 cfgfilename\n";
+	print "usage: $0 [-mModule] cfgfilename\n";
 	exit(1);
 }
 
@@ -38,19 +43,15 @@ sub type {
 	my($data) = @_;
 	my($type, $class, $tiedclass) = Pogo::type_of($data);
 	my $oid = sprintf("%x", Pogo::object_id($data));
-	my $hashtype = 
-		$tiedclass eq 'Pogo::Hash' ? '(Hash)' :
-		$tiedclass eq 'Pogo::Htree' ? '(Htree)' :
-		$tiedclass eq 'Pogo::Btree' ? '(Btree)' :
-		$tiedclass eq 'Pogo::Ntree' ? '(Ntree)' : '';
-	($type, $class, $hashtype, $oid);
+	my $objclass = "($tiedclass)";
+	($type, $class, $objclass, $oid);
 }
 
 sub browse {
 	my($location, $data) = @_;
 	$Data{$location} = $data;
-	my($type, $class, $hashtype, $oid) = type($data);
-	my $prompt = "$location=$class($type$hashtype($oid))>";
+	my($type, $class, $objclass, $oid) = type($data);
+	my $prompt = "$location=$class($type$objclass($oid))>";
 	while(1) {
 		print $prompt;
 		my $input = <STDIN>;
@@ -75,26 +76,34 @@ sub ls {
 	$arg ||= '.';
 	if( $type eq 'SCALAR' ) {
 		my $dt = $$data;
-		my($ref, $class, $hashtype, $oid) = type($dt);
+		my($ref, $class, $objclass, $oid) = type($dt);
 		if( !defined $dt ) { print ". = undef\n"; }
-		elsif( $ref ) { print ". = $class($ref$hashtype($oid))\n"; } 
+		elsif( $ref ) { print ". = $class($ref$objclass($oid))\n"; } 
 		else { print ". = \"$dt\"\n"; }
 	} elsif( $type eq 'ARRAY' ) {
+		my @invfield;
+		if( (Pogo::type_of($data->[0]))[0] eq 'HASH' ) {
+			for my $key(keys %{$data->[0]}) {
+				$invfield[$data->[0]->{$key}] = $key if $data->[0]->{$key};
+			}
+		}
 		for(my $j = 0; $j < @$data; $j++ ) {
 			if( $j =~ /$arg/ ) {
 				my $dt = $data->[$j];
-				my($ref, $class, $hashtype, $oid) = type($dt);
-				if( !defined $dt ) { print "[$j] = undef\n"; }
-				elsif( $ref ) { print "[$j] = $class($ref$hashtype($oid))\n"; } 
-				else { print "[$j] = \"$dt\"\n"; }
+				my($ref, $class, $objclass, $oid) = type($dt);
+				my $k = $j;
+				$k .= "($invfield[$j])" if $invfield[$j];
+				if( !defined $dt ) { print "[$k] = undef\n"; }
+				elsif( $ref ) { print "[$k] = $class($ref$objclass($oid))\n"; } 
+				else { print "[$k] = \"$dt\"\n"; }
 			}
 		}
 	} elsif( $type eq 'HASH' ) {
 		while( my($k, $v) = each %$data ) {
 			if( $k =~ /$arg/ ) {
-				my($ref, $class, $hashtype, $oid) = type($v);
+				my($ref, $class, $objclass, $oid) = type($v);
 				if( !defined $v ) { print "{$k} = undef\n"; }
-				elsif( $ref ) { print "{$k} = $class($ref$hashtype($oid))\n"; } 
+				elsif( $ref ) { print "{$k} = $class($ref$objclass($oid))\n"; } 
 				else { print "{$k} = \"$v\"\n"; }
 			}
 		}
@@ -121,7 +130,17 @@ sub cd {
 			$Parent{$loc} = $location;
 			$dt = $data->[$arg];
 		}
-	} elsif( $type eq 'HASH' && exists $data->{$arg} ) {
+	} elsif( $type eq 'HASH' ) {
+		unless( exists $data->{$arg} ) {
+			my @cand = grep /^\Q$arg/, keys %$data;
+			my($cand, $line);
+			for $cand(@cand) {
+				print "cd $cand? (y/n/e)";
+				$line = <STDIN>;
+				$arg = $cand, last if $line =~ /y/i;
+				last if $line =~ /e/i;
+			}
+		}
 		if( ref($data->{$arg}) ) {
 			$loc = "$location\{$arg\}";
 			$Parent{$loc} = $location;

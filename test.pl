@@ -88,6 +88,7 @@ push @keys, $ntree->next_key($keys[0]);
   test(25, join(',', @keys) eq "2,10");
 
 print "tie...\n";
+
 $scalarref = new_tie Pogo::Scalar;
 $$scalarref = "test";
   test(26, $$scalarref eq "test");

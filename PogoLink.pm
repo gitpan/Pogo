@@ -6,52 +6,84 @@ use Pogo;
 package PogoLink;
 use Carp;
 use strict;
+use vars qw(@Fields %Fields);
+
+BEGIN {
+	@Fields = qw(OBJECT LINK LINKCLASS INVFIELD KEYFIELD SIZE LINKCLASSISARRAY);
+	%Fields = map { $Fields[$_], $_+1 } (0 .. $#Fields);
+	sub FIELDHASH { \%Fields }
+}
+
 sub new {
-	my($class, $object, $linkclass, $invattr, $keyattr) = @_;
-	croak "Hash object required" unless (Pogo::type_of($object))[0] eq 'HASH';
-	my $self = {
-		OBJECT    => $object,
-		LINK      => undef,
-		LINKCLASS => $linkclass,
-		INVATTR   => $invattr,
-		KEYATTR   => $keyattr,
-	};
-	bless $self, $class;
+	my($class, $object, $linkclass, $invfield, $keyfield, $size) = @_;
+	my $type = (Pogo::type_of($object))[0];
+	croak "Hash or array object required" 
+		unless $type eq 'HASH' || $type eq 'ARRAY';
+	my $self = new_tie Pogo::Harray 8, $object, $class;
+	$self->{OBJECT}    = $object;
+	$self->{LINK}      = undef;
+	$self->{LINKCLASS} = $linkclass;
+	$self->{INVFIELD}  = $invfield;
+	$self->{KEYFIELD}  = $keyfield;
+	$self->{SIZE}      = $size;
+	$self->{LINKCLASSISARRAY} = $invfield =~ /^\d+$/;
+	$self;
 }
 sub clear {
 	my $self = shift;
 	my @objects = $self->getlist;
 	return unless @objects;
-	my $invattr = $self->{INVATTR};
+	my $invfield = $self->{INVFIELD};
 	Pogo::tied_object($self)->begin_transaction;
 	for my $object(@objects) {
 		$self->_del($object);
-		$object->{$invattr}->_del($self->{OBJECT});
+		if( $self->{LINKCLASSISARRAY} ) {
+			$object->[$invfield]->_del($self->{OBJECT});
+		} else {
+			$object->{$invfield}->_del($self->{OBJECT});
+		}
 	}
 	Pogo::tied_object($self)->end_transaction;
 }
 sub del {
 	my($self, $object) = @_;
+	return unless $object && ref($object);
 	return unless $self->find($object);
-	my $invattr = $self->{INVATTR};
+	my $invfield = $self->{INVFIELD};
 	Pogo::tied_object($self)->begin_transaction;
 	$self->_del($object);
-	$object->{$invattr}->_del($self->{OBJECT});
+	if( $self->{LINKCLASSISARRAY} ) {
+		$object->[$invfield]->_del($self->{OBJECT});
+	} else {
+		$object->{$invfield}->_del($self->{OBJECT});
+	}
 	Pogo::tied_object($self)->end_transaction;
 }
 sub add {
 	my($self, $object) = @_;
+	return unless $object && ref($object);
 	my $linkclass = $self->{LINKCLASS};
 	croak "Class mismatch" if $linkclass && !$object->isa($linkclass);
 	return if $self->find($object);
-	my $invattr = $self->{INVATTR};
-	croak "Hash object required" unless (Pogo::type_of($object))[0] eq 'HASH';
-	my $invclass = (Pogo::type_of($object->{$invattr}))[1];
+	my $invfield = $self->{INVFIELD};
+	my $type = (Pogo::type_of($object))[0];
+	croak "Hash object required" 
+		unless $type eq 'HASH' || 
+			($type eq 'ARRAY' && (Pogo::type_of($object->[0]))[0] eq 'HASH');
+	my $invfieldvalue = $self->{LINKCLASSISARRAY} ? 
+			$object->[$invfield] : $object->{$invfield};
+	if( !$invfieldvalue && $object->can("INIT_$invfield") ) {
+		my $initmethod = "INIT_$invfield";
+		no strict 'refs';
+		$object->$initmethod();
+	}
+	$invfieldvalue = $self->{LINKCLASSISARRAY} ? 
+			$object->[$invfield] : $object->{$invfield};
 	croak "Inverse attribute must be a PogoLink::* object" 
-		unless $invclass =~ /^PogoLink::/;
+		unless (Pogo::type_of($invfieldvalue))[1] =~ /^PogoLink::/;
 	Pogo::tied_object($self)->begin_transaction;
 	$self->_add($object);
-	$object->{$invattr}->_add($self->{OBJECT});
+	$invfieldvalue->_add($self->{OBJECT});
 	Pogo::tied_object($self)->end_transaction;
 }
 
@@ -79,8 +111,14 @@ sub _del {
 }
 sub _add {
 	my($self, $object) = @_;
-	my $invattr = $self->{INVATTR};
-	$self->{LINK}->{$invattr}->_del($self->{OBJECT}) if $self->{LINK};
+	my $invfield = $self->{INVFIELD};
+	if( $self->{LINK} ) {
+		if( $self->{LINKCLASSISARRAY} ) {
+			$self->{LINK}->[$invfield]->_del($self->{OBJECT});
+		} else {
+			$self->{LINK}->{$invfield}->_del($self->{OBJECT});
+		}
+	}
 	$self->{LINK} = $object;
 }
 
@@ -92,7 +130,7 @@ use vars qw(@ISA);
 sub get {
 	my($self, $idx) = @_;
 	return undef unless $self->{LINK};
-	$self->{LINK}->[$idx];
+	defined $idx ? $self->{LINK}->[$idx] : @{$self->{LINK}};
 }
 sub getlist {
 	my $self = shift;
@@ -112,7 +150,8 @@ sub _del {
 sub _add {
 	my($self, $object) = @_;
 	unless( $self->find($object) ) {
-		$self->{LINK} = [] unless $self->{LINK};
+		$self->{LINK} = new Pogo::Array($self->{SIZE})
+			unless $self->{LINK};
 		push @{$self->{LINK}}, $object;
 	}
 }
@@ -125,7 +164,7 @@ use vars qw(@ISA);
 sub get {
 	my($self, $key) = @_;
 	return undef unless $self->{LINK};
-	$self->{LINK}->{$key};
+	defined $key ? $self->{LINK}->{$key} : values %{$self->{LINK}};
 }
 sub getlist {
 	my $self = shift;
@@ -140,20 +179,24 @@ sub getkeylist {
 sub find {
 	my($self, $object) = @_;
 	return 0 unless $self->{LINK};
-	my $key = $object->{$self->{KEYATTR}};
+	my $key = $self->{LINKCLASSISARRAY} ? 
+		$object->[$self->{KEYFIELD}] : $object->{$self->{KEYFIELD}};
 	exists $self->{LINK}->{$key};
 }
 sub _del {
 	my($self, $object) = @_;
 	return unless $self->{LINK};
-	my $key = $object->{$self->{KEYATTR}};
+	my $key = $self->{LINKCLASSISARRAY} ? 
+		$object->[$self->{KEYFIELD}] : $object->{$self->{KEYFIELD}};
 	delete $self->{LINK}->{$key};
 }
 sub _add {
 	my($self, $object) = @_;
 	unless( $self->find($object) ) {
-		$self->{LINK} = new Pogo::Hash unless $self->{LINK};
-		my $key = $object->{$self->{KEYATTR}};
+		$self->{LINK} = new Pogo::Hash($self->{SIZE})
+			unless $self->{LINK};
+		my $key = $self->{LINKCLASSISARRAY} ? 
+			$object->[$self->{KEYFIELD}] : $object->{$self->{KEYFIELD}};
 		$self->{LINK}->{$key} = $object;
 	}
 }
@@ -166,8 +209,10 @@ use vars qw(@ISA);
 sub _add {
 	my($self, $object) = @_;
 	unless( $self->find($object) ) {
-		$self->{LINK} = new Pogo::Htree unless $self->{LINK};
-		my $key = $object->{$self->{KEYATTR}};
+		$self->{LINK} = new Pogo::Htree($self->{SIZE})
+			unless $self->{LINK};
+		my $key = $self->{LINKCLASSISARRAY} ? 
+			$object->[$self->{KEYFIELD}] : $object->{$self->{KEYFIELD}};
 		$self->{LINK}->{$key} = $object;
 	}
 }
@@ -181,7 +226,8 @@ sub _add {
 	my($self, $object) = @_;
 	unless( $self->find($object) ) {
 		$self->{LINK} = new Pogo::Btree unless $self->{LINK};
-		my $key = $object->{$self->{KEYATTR}};
+		my $key = $self->{LINKCLASSISARRAY} ? 
+			$object->[$self->{KEYFIELD}] : $object->{$self->{KEYFIELD}};
 		$self->{LINK}->{$key} = $object;
 	}
 }
@@ -195,7 +241,8 @@ sub _add {
 	my($self, $object) = @_;
 	unless( $self->find($object) ) {
 		$self->{LINK} = new Pogo::Ntree unless $self->{LINK};
-		my $key = $object->{$self->{KEYATTR}};
+		my $key = $self->{LINKCLASSISARRAY} ? 
+			$object->[$self->{KEYFIELD}] : $object->{$self->{KEYFIELD}};
 		$self->{LINK}->{$key} = $object;
 	}
 }
@@ -213,9 +260,8 @@ PogoLink - Bidirectional relationship class for objects in a Pogo database
   # Define relationships
   package Person;
   sub new {
-      my($class, $pogo, $name) = @_;
-      # Make a hash ref persistent by $pogo and blessed by $class
-      my $self = new_tie Pogo::Hash 8, $pogo, $class;
+      my($class, $name) = @_;
+      my $self = new_tie Pogo::Hash 8, undef, $class;
       %$self = (
           NAME     => $name,
           FATHER   => new PogoLink::Scalar($self, 'Man',    'CHILDREN'),
@@ -227,8 +273,8 @@ PogoLink - Bidirectional relationship class for objects in a Pogo database
   package Man;
   @ISA = qw(Person);
   sub new {
-      my($class, $pogo, $name) = @_;
-      my $self = $class->SUPER::new($pogo, $name);
+      my($class, $name) = @_;
+      my $self = $class->SUPER::new($name);
       $self->{CHILDREN} = new PogoLink::Array ($self, 'Person', 'FATHER');
       $self->{WIFE}     = new PogoLink::Scalar($self, 'Woman',  'HUS');
       $self;
@@ -236,19 +282,18 @@ PogoLink - Bidirectional relationship class for objects in a Pogo database
   package Woman;
   @ISA = qw(Person);
   sub new {
-      my($class, $pogo, $name) = @_;
-      my $self = $class->SUPER::new($pogo, $name);
+      my($class, $name) = @_;
+      my $self = $class->SUPER::new($name);
       $self->{CHILDREN} = new PogoLink::Array ($self, 'Person', 'MOTHER');
       $self->{HUS}      = new PogoLink::Scalar($self, 'Man',    'WIFE');
       $self;
   }
 
   # Use relationships
-  $Pogo = new Pogo 'sample.cfg';
-  $Dad = new Man   $Pogo, 'Dad';
-  $Mom = new Woman $Pogo, 'Mom';
-  $Jr  = new Man   $Pogo, 'Jr';
-  $Gal = new Woman $Pogo, 'Gal';
+  $Dad = new Man   'Dad';
+  $Mom = new Woman 'Mom';
+  $Jr  = new Man   'Jr';
+  $Gal = new Woman 'Gal';
   # Marriage 
   $Dad->{WIFE}->add($Mom);     # $Mom->{HUS} links to $Dad automatically
   # Birth
@@ -288,16 +333,18 @@ Pogo::* to have links.
 
 =head2 Methods
 
-=item new PogoLink::* $selfobject, $linkclass, $invattr, $keyattr
+=item new PogoLink::* $selfobject, $linkclass, $invfield, $keyfield, $size
 
 Constructor. Class method. $selfobject is a object in the database which 
 possesses this link. It must be a object as a hash reference. 
 $linkclass is a class name of linked object. If $linkclass defaults, 
-any class object is allowed. $invattr is an attribute (i.e. hash key) name 
-of the linked object which links inversely. $keyattr is only necessary for 
+any class object is allowed. $invfield is a field (i.e. hash key) name 
+of the linked object which links inversely. $keyfield is only necessary for 
 PogoLink::Hash, PogoLink::Htree, PogoLink::Btree, PogoLink::Ntree. 
-It specifies an attribute name of the linked object thats value is used as 
-the key of this link hash.
+It specifies a field name of the linked object thats value is used as 
+the key of this link hash. $size may be specified for PogoLink::Array,
+PogoLink::Hash or PogoLink::Htree. $size will be used when internal linking 
+Pogo::Array, Pogo::Hash or Pogo::Htree object will be constructed.
 
 NOTE: You cannot use PogoLink::* constructors as follows in a class constructor.
 
@@ -309,19 +356,20 @@ NOTE: You cannot use PogoLink::* constructors as follows in a class constructor.
       $self;
   }
 
-Because the self-object which is passed to PogoLink::* constructors must 
-be a object in the database. In the above sample, $self is on the memory yet.
+Because the self-object which is passed to PogoLink::* constructors must be 
+tied to a Pogo::* object. In the above sample, $self is a Perl object on the 
+memory yet.
 The right way is as follows.
 
   sub new {
-      my($class, $pogo) = @_;
-      my $self = new_tie Pogo::Hash 8, $pogo, $class;
+      my($class) = @_;
+      my $self = new_tie Pogo::Hash 8, undef, $class;
       $self->{FOO} = new PogoLink::Scalar $self, 'Foo', 'BAR';
       $self;
   }
 
-You can make a database-stored and blessed reference by using new_tie which 
-takes a Pogo object and a class name as arguments.
+You can make a blessed reference which is tied to specified Pogo::* object by 
+using new_tie which takes a class name as arguments.
 
 =item get $idx_or_key
 
@@ -352,13 +400,17 @@ Unlink to $object.
 
 =item add $object
 
-Link to $object.
+Link to $object. The inverse field (it's name was specified as $invfield by 
+new()) of $object must be a PogoLink::* object. If the inverse field is not 
+defined yet and $object has INIT_fieldname method (e.g. the field name is 
+'FIELD', the method name is 'INIT_FIELD'), this method calls 
+$object->INIT_fieldname() to initialize the inverse field before linking.
 
 =back
 
 =head1 AUTHOR
 
-Sey Nakajima <sey@jkc.co.jp>
+Sey Nakajima <nakajima@netstock.co.jp>
 
 =head1 SEE ALSO
 

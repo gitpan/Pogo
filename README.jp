@@ -1,5 +1,5 @@
 Pogo - Perl GOODS interface
-(C)1999 中島 靖 <sey@jkc.co.jp>
+(C)1999-2004 中島 靖 <nakajima@netstock.co.jp>
 
 Pogo は、オブジェクト指向データベース GOODS (Generic Object Oriented  
 Database System) の Perl インターフェースです。GOODS は Konstantin    
@@ -10,20 +10,19 @@ Pogo はフリーソフトウェアです。
 本モジュールはアルファバージョンの段階にあります。すべての機能は変更の
 可能性があります。ぜひバグレポートや提案をお寄せください。
 
-作者は FreeBSD2.2.8, FreeBSD3.4, Linux MLD4 上で、開発とテストを行って
-います。他の OS でのテスト結果や、移植についての情報も歓迎します。
+作者は FreeBSD4.7, FreeBSD4.9 上で、開発とテストを行っています。他の  
+OS でのテスト結果や、移植についての情報も歓迎します。
 
 -----
 GOODS の準備
 
   goods-x.xx.tar.gz を次のいずれかの場所からダウンロードしてください。
   (x.xx はバージョン番号)
-    http://www.ispras.ru/~knizhnik/goods.html
-    http://www.geocities.com/SiliconValley/Orchard/5802/goods.html
+    http://www.garret.ru/~knizhnik/goods.html
     http://hp1.jonex.ne.jp/~nakajima.yasushi/
 
-  注意: goods-2.24.tar.gz にはバグがあります。もし2.24が最新版なら、2.
-  23を使ってください。
+  注意: goods-2.74.tar.gz と goods-2.75.tar.gz にはバグがあります。2. 
+  76以降を使ってください。
 
   tar zxvf goods-x.xx.tar.gz
   cd goods
@@ -59,6 +58,10 @@ Pogo の作成、テスト、インストール
   goodsrv を test.cfg によって起動しなくてはなりません。それには、'./ 
   startgoodsrv test &' と実行してください。バックグラウンドで実行され 
   ます。終了するには、'./cmdgoodsrv test exit' と実行してください。
+
+  もしmake testがsegmentation faultで失敗するようなら、
+  perl Makefile.PL -DGLOBALDB を試してみてください。
+
 
 -----
 データベースブラウザ

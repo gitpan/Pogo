@@ -141,6 +141,10 @@ public:
 	ref<set_member> findGE(const char* str, size_t len, skey_t key) const;
 	ref<set_member> findGE(const char* str) const;
 
+	char*	next_key(char*& p, const char* key) const;
+	char*	prev_key(char*& p, const char* key) const;
+	char*	find_key(char*& p, const char* key) const;
+
 	void	insert(char const* key, ref<object> obj);
 	
 	static ref<eNtree> create() { return new eNtree(self_class); } 
@@ -214,5 +218,24 @@ public:
 	METACLASS_DECLARATIONS(eTime, object);
 	};
 // end class eTime
+
+//--------------------------------------------------------------------
+class SortedNumArray : public ArrayOfInt { 
+protected: 
+	SortedNumArray(class_descriptor& desc, size_t init_size) 
+		: ArrayOfInt(desc, init_size, init_size) {}
+public: 
+	int	find(int4 num) const;
+	int	find_pos(int4 num, int ins) const;
+	void ins(int4 num);
+	void del(int4 num);
+	void setsize(nat4 size) { set_size(size); }
+	static ref<SortedNumArray> create(size_t init_size = 0) { 
+		return new (self_class, init_size) 
+			SortedNumArray(self_class, init_size); 
+	}
+	METACLASS_DECLARATIONS(SortedNumArray, ArrayOfInt); 
+};
+// end class SortedNumArray
 
 #endif

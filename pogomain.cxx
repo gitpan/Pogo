@@ -11,9 +11,7 @@
 #include "pogomain.h"
 #include "pogocall.h"
 
-#define DEBUG	0
-
-#if DEBUG
+#ifdef POGO_DEBUG
 #define D(m)	{m;}
 #else
 #define D(m)
@@ -22,28 +20,39 @@
 // ------------------------------------------------------------------
 // Persistent classes corresponding to interface classes
 // ------------------------------------------------------------------
-pVar::pVar(class_descriptor &desc = self_class) : object(desc) {
-	classname = NULL;
+pVar::pVar(class_descriptor &desc) : object(desc) {
+	pclass = NULL;
+	blessclass = NULL;
 }
 char* pVar::get_class() const {
-	if( classname == NULL )	return NULL;
+	if( blessclass == NULL )	return NULL;
 	static char* buf = NULL;
-	return classname->get_text_alloc(buf);
+	return blessclass->get_text_alloc(buf);
 }
 void  pVar::set_class(const char* name) {
-	if( classname == NULL )	classname = eString::create(name);
-	else modify(classname)->replace(name);
+	if( blessclass == NULL )	blessclass = eString::create(name);
+	else modify(blessclass)->replace(name);
 }
-int  pVar::_call(void* func, void* argref) {
+char* pVar::get_pclass() const {
+	if( pclass == NULL )	return NULL;
+	static char* buf = NULL;
+	return pclass->get_text_alloc(buf);
+}
+void  pVar::set_pclass(const char* name) {
+	if( pclass == NULL )	pclass = eString::create(name);
+	else modify(pclass)->replace(name);
+}
+callresult  pVar::_call(void* func, void* argref) {
 	return _pogo_call_sv(func, argref);
 }
 
 field_descriptor& pVar::describe_components() {
 	return
-		FIELD(classname);
+		FIELD(pclass),
+		FIELD(blessclass);
 }
 
-REGISTER(pVar, object, hierarchical_access_scheme);
+REGISTER(pVar, object, pessimistic_repeatable_read_scheme);
 
 // ------------------------------------------------------------------
 pScalar::pScalar() : pVar(self_class) {
@@ -235,9 +244,12 @@ char*    pBtree::find_key(const char* key) const {
 
 // initialization for the database root object
 void pBtree::initialize() const {
+	D(printf("pBtree::initialize()\n"))
 	if( is_abstract_root() ) {
 		ref<pBtree> root = this;
 		modify(root)->become(new pBtree());
+		modify(root)->set_pclass("Pogo::Btree");
+		D(printf("root becomes pBtree\n"))
 	}
 }
 
@@ -345,6 +357,46 @@ field_descriptor& pHtree::describe_components() {
 REGISTER(pHtree, pVar, pessimistic_repeatable_read_scheme);
 
 // ------------------------------------------------------------------
+pSortedNumArray::pSortedNumArray(unsigned size) : pVar(self_class) {
+	snarray = SortedNumArray::create(size_t(size));
+}
+int     pSortedNumArray::get(unsigned idx) const {
+	if( idx >= snarray->length() )	return 0L;
+	return snarray->getat(nat4(idx));
+}
+int      pSortedNumArray::find(int val) const {
+	return snarray->find(int4(val));
+}
+int      pSortedNumArray::findGE(int val) const {
+	return snarray->find_pos(int4(val), 0);
+}
+void     pSortedNumArray::set(int val) {
+	modify(snarray)->ins(int4(val));
+}
+void     pSortedNumArray::ins(int val) {
+	modify(snarray)->ins(int4(val));
+}
+void     pSortedNumArray::del(int val) {
+	modify(snarray)->del(int4(val));
+}
+unsigned      pSortedNumArray::get_size() const {
+	return snarray->length();
+}
+void     pSortedNumArray::set_size(unsigned size) {
+	modify(snarray)->setsize(nat4(size));
+}
+void     pSortedNumArray::clear() {
+	modify(snarray)->setsize(0);
+}
+
+field_descriptor& pSortedNumArray::describe_components() {
+	return
+		FIELD(snarray);
+}
+
+REGISTER(pSortedNumArray, pVar, pessimistic_repeatable_read_scheme);
+
+// ------------------------------------------------------------------
 // Perl interface classes (non persistent)
 // ------------------------------------------------------------------
 char* Pvar::perl_class() const { return this->_perl_class(); }
@@ -354,16 +406,27 @@ char* Pvar::perl_class() const { return this->_perl_class(); }
    Pstring object is only used as internal temporary interface.
 */
 char* Pvar::get_class() const { 
-	return ref<pVar>(this->strip())->get_class(); 
+	ref<pVar> var = this->strip();
+	return var->get_class(); 
 }
 void  Pvar::set_class(const char* name) { 
-	modify(ref<pVar>(this->strip()))->set_class(name); 
+	ref<pVar> var = this->strip();
+	modify(var)->set_class(name); 
 }
-int   Pvar::_call(void* func, void* argref) {
-	return modify(ref<pVar>(this->strip()))->_call(func, argref); 
+char* Pvar::get_pclass() const { 
+	ref<pVar> var = this->strip();
+	return var->get_pclass(); 
 }
-int   Pvar::equal(const Pvar* var) {
-	return this->strip() == var->strip() ? 1 : 0;
+void  Pvar::set_pclass(const char* name) { 
+	ref<pVar> var = this->strip();
+	modify(var)->set_pclass(name); 
+}
+callresult   Pvar::_call(void* func, void* argref) {
+	ref<pVar> var = this->strip();
+	return modify(var)->_call(func, argref); 
+}
+int   Pvar::_equal(const Pvar* var) {
+	return var != NULL ? (this->strip() == var->strip() ? 1 : 0) : 0;
 }
 int   Pvar::wait_modification(unsigned sec) {
 	event	modified;
@@ -386,12 +449,34 @@ void  Pvar::begin_transaction() { modify(this->strip())->begin_transaction(); }
 void  Pvar::abort_transaction() { modify(this->strip())->abort_transaction(); }
 void  Pvar::end_transaction() { modify(this->strip())->end_transaction(); }
 
+Pvar* Pvar::root() {
+	database* db = (database *)this->strip()->get_database();
+	if( db == NULL ) 
+		return NULL;
+	ref<pBtree> rootbtree;
+	db->get_root(rootbtree);
+	return wrap(rootbtree);
+}
+
 // ------------------------------------------------------------------
 Pstring::Pstring(const nstring* str, Pogo* pogo = NULL) {
 	if( str == NULL ) string = NULL;
 	else { 
 		string = eString::create(str); 
 		if( pogo != NULL ) string->attach_to_storage(pogo->db, 0);
+	}
+	D(printf("Pstring created\n"))
+}
+Pstring::Pstring(const nstring* str, Pvar* pvar) {
+	if( str == NULL ) string = NULL;
+	else { 
+		string = eString::create(str); 
+		if( pvar != NULL ) {
+			ref<object> pvarobj = pvar->strip();
+			if( pvarobj->get_database() ) {
+				string->cluster_with(pvarobj);
+			}
+		}
 	}
 	D(printf("Pstring created\n"))
 }
@@ -426,6 +511,16 @@ Pscalar::Pscalar(Pogo* pogo = NULL) {
 	if( pogo != NULL ) scalar->attach_to_storage(pogo->db, 0);
 	D(printf("Pscalar created\n"))
 }
+Pscalar::Pscalar(Pvar* pvar) {
+	scalar = pScalar::create();
+	if( pvar != NULL ) {
+		ref<object> pvarobj = pvar->strip();
+		if( pvarobj->get_database() ) {
+			scalar->cluster_with(pvarobj);
+		}
+	}
+	D(printf("Pscalar created\n"))
+}
 Pscalar::~Pscalar() {
 	D(printf("Pscalar destroyed\n"))
 }
@@ -442,7 +537,7 @@ void     Pscalar::set(const nstring* str) {
 }
 
 char*    Pscalar::_perl_class() const { return perl_class(); }
-char*    Pscalar::perl_class() const { return "Pogo::Scalar"; }
+char*    Pscalar::perl_class() const { return get_pclass(); }
 ref<object> Pscalar::strip() const { return scalar; }
 Pscalar::Pscalar(ref<pScalar> pscalar) { scalar = pscalar; }
 
@@ -450,6 +545,16 @@ Pscalar::Pscalar(ref<pScalar> pscalar) { scalar = pscalar; }
 Parray::Parray(unsigned size, Pogo* pogo = NULL) { 
 	array = pArray::create(size); 
 	if( pogo != NULL ) array->attach_to_storage(pogo->db, 0);
+	D(printf("Parray created\n"))
+}
+Parray::Parray(unsigned size, Pvar* pvar) { 
+	array = pArray::create(size); 
+	if( pvar != NULL ) {
+		ref<object> pvarobj = pvar->strip();
+		if( pvarobj->get_database() ) {
+			array->cluster_with(pvarobj);
+		}
+	}
 	D(printf("Parray created\n"))
 }
 Parray::~Parray() {
@@ -489,7 +594,7 @@ Pvar*    Parray::remove(unsigned idx) {
 }
 
 char* Parray::_perl_class() const { return perl_class(); }
-char* Parray::perl_class() const { return "Pogo::Array"; }
+char* Parray::perl_class() const { return get_pclass(); }
 ref<object> Parray::strip() const { return array; }
 Parray::Parray(ref<pArray> parr) { array = parr; }
 
@@ -497,6 +602,16 @@ Parray::Parray(ref<pArray> parr) { array = parr; }
 Phash::Phash(unsigned size, Pogo* pogo = NULL) { 
 	hash = pHash::create(size); 
 	if( pogo != NULL ) hash->attach_to_storage(pogo->db, 0);
+	D(printf("Phash created\n"))
+}
+Phash::Phash(unsigned size, Pvar* pvar) { 
+	hash = pHash::create(size); 
+	if( pvar != NULL ) {
+		ref<object> pvarobj = pvar->strip();
+		if( pvarobj->get_database() ) {
+			hash->cluster_with(pvarobj);
+		}
+	}
 	D(printf("Phash created\n"))
 }
 Phash::~Phash() {
@@ -524,7 +639,7 @@ char*    Phash::first_key() const { return hash->first_key(); }
 char*    Phash::next_key(const char* key) const { return hash->next_key(key); }
 
 char* Phash::_perl_class() const { return perl_class(); }
-char* Phash::perl_class() const { return "Pogo::Hash"; }
+char* Phash::perl_class() const { return get_pclass(); }
 ref<object> Phash::strip() const { return hash; }
 Phash::Phash(ref<pHash> phash) { hash = phash; }
 
@@ -532,6 +647,16 @@ Phash::Phash(ref<pHash> phash) { hash = phash; }
 Phtree::Phtree(unsigned size, Pogo* pogo = NULL) { 
 	htree = pHtree::create(size); 
 	if( pogo != NULL ) htree->attach_to_storage(pogo->db, 0);
+	D(printf("Phtree created\n"))
+}
+Phtree::Phtree(unsigned size, Pvar* pvar) { 
+	htree = pHtree::create(size); 
+	if( pvar != NULL ) {
+		ref<object> pvarobj = pvar->strip();
+		if( pvarobj->get_database() ) {
+			htree->cluster_with(pvarobj);
+		}
+	}
 	D(printf("Phtree created\n"))
 }
 Phtree::~Phtree() {
@@ -559,7 +684,7 @@ char*    Phtree::first_key() const { return htree->first_key(); }
 char*    Phtree::next_key(const char* key) const { return htree->next_key(key); }
 
 char* Phtree::_perl_class() const { return perl_class(); }
-char* Phtree::perl_class() const { return "Pogo::Htree"; }
+char* Phtree::perl_class() const { return get_pclass(); }
 ref<object> Phtree::strip() const { return htree; }
 Phtree::Phtree(ref<pHtree> phtree) { htree = phtree; }
 
@@ -567,6 +692,16 @@ Phtree::Phtree(ref<pHtree> phtree) { htree = phtree; }
 Pbtree::Pbtree(Pogo* pogo = NULL) { 
 	btree = pBtree::create(); 
 	if( pogo != NULL ) btree->attach_to_storage(pogo->db, 0);
+	D(printf("Pbtree created\n"))
+}
+Pbtree::Pbtree(Pvar* pvar) { 
+	btree = pBtree::create(); 
+	if( pvar != NULL ) {
+		ref<object> pvarobj = pvar->strip();
+		if( pvarobj->get_database() ) {
+			btree->cluster_with(pvarobj);
+		}
+	}
 	D(printf("Pbtree created\n"))
 }
 Pbtree::~Pbtree() {
@@ -597,7 +732,7 @@ char*    Pbtree::prev_key(const char* key) const { return btree->prev_key(key); 
 char*    Pbtree::find_key(const char* key) const { return btree->find_key(key); }
 
 char* Pbtree::_perl_class() const { return perl_class(); }
-char* Pbtree::perl_class() const { return "Pogo::Btree"; }
+char* Pbtree::perl_class() const { return get_pclass(); }
 ref<object> Pbtree::strip() const { return btree; }
 Pbtree::Pbtree(ref<pBtree> pbtree) { btree = pbtree; }
 
@@ -605,6 +740,16 @@ Pbtree::Pbtree(ref<pBtree> pbtree) { btree = pbtree; }
 Pntree::Pntree(Pogo* pogo = NULL) { 
 	ntree = pNtree::create(); 
 	if( pogo != NULL ) ntree->attach_to_storage(pogo->db, 0);
+	D(printf("Pntree created\n"))
+}
+Pntree::Pntree(Pvar* pvar) { 
+	ntree = pNtree::create(); 
+	if( pvar != NULL ) {
+		ref<object> pvarobj = pvar->strip();
+		if( pvarobj->get_database() ) {
+			ntree->cluster_with(pvarobj);
+		}
+	}
 	D(printf("Pntree created\n"))
 }
 Pntree::~Pntree() {
@@ -633,11 +778,45 @@ char*    Pntree::last_key() const { return ntree->last_key(); }
 char*    Pntree::next_key(const char* key) const { return ntree->next_key(key); }
 char*    Pntree::prev_key(const char* key) const { return ntree->prev_key(key); }
 char*    Pntree::find_key(const char* key) const { return ntree->find_key(key); }
-
 char* Pntree::_perl_class() const { return perl_class(); }
-char* Pntree::perl_class() const { return "Pogo::Ntree"; }
+char* Pntree::perl_class() const { return get_pclass(); }
 ref<object> Pntree::strip() const { return ntree; }
 Pntree::Pntree(ref<pNtree> pntree) { ntree = pntree; }
+
+// ------------------------------------------------------------------
+Psnarray::Psnarray(unsigned size, Pogo* pogo = NULL) { 
+	snarray = pSortedNumArray::create(size); 
+	if( pogo != NULL ) snarray->attach_to_storage(pogo->db, 0);
+	D(printf("Psnarray created\n"))
+}
+Psnarray::Psnarray(unsigned size, Pvar* pvar) { 
+	snarray = pSortedNumArray::create(size); 
+	if( pvar != NULL ) {
+		ref<object> pvarobj = pvar->strip();
+		if( pvarobj->get_database() ) {
+			snarray->cluster_with(pvarobj);
+		}
+	}
+	D(printf("Psnarray created\n"))
+}
+Psnarray::~Psnarray() {
+	D(printf("Psnarray destroyed\n"))
+}
+int     Psnarray::get(unsigned idx) const { return snarray->get(idx); }
+int      Psnarray::find(int val) const { return snarray->find(val); }
+int      Psnarray::findGE(int val) const { return snarray->findGE(val); }
+void     Psnarray::set(int val) { modify(snarray)->set(val); }
+void     Psnarray::ins(int val) { modify(snarray)->ins(val); }
+void     Psnarray::del(int val) { modify(snarray)->del(val); }
+unsigned Psnarray::get_size() const { return snarray->get_size(); }
+void     Psnarray::set_size(unsigned size) { modify(snarray)->set_size(size); }
+void     Psnarray::clear() { modify(snarray)->clear(); }
+
+char* Psnarray::_perl_class() const { return perl_class(); }
+char* Psnarray::perl_class() const { return get_pclass(); }
+ref<object> Psnarray::strip() const { return snarray; }
+Psnarray::Psnarray(ref<pSortedNumArray> psnarr) { snarray = psnarr; }
+
 
 // wrap() (convert ref<object> to Pvar*)
 Pvar* wrap(ref<object> val) {
@@ -656,6 +835,8 @@ Pvar* wrap(ref<object> val) {
 		return new Pbtree(ref<pBtree>(val));
 	} else if( val->cls.ctid == pNtree::self_class.ctid ) {
 		return new Pntree(ref<pNtree>(val));
+	} else if( val->cls.ctid == pSortedNumArray::self_class.ctid ) {
+		return new Psnarray(ref<pSortedNumArray>(val));
 	}
 	return NULL;
 }
@@ -687,16 +868,16 @@ Pntree* wrap(ref<pNtree> val) {
 	if( val == NULL ) return NULL;
 	return new Pntree(val);
 }
+Psnarray* wrap(ref<pSortedNumArray> val) {
+	if( val == NULL ) return NULL;
+	return new Psnarray(val);
+}
 
 // Pogo
 Pogo::Pogo(const char* cfgfile = NULL) {
-	if( !task_initialized ) {
-    	task::initialize(task::huge_stack);
-		task_initialized = 1;
-		D(printf("task initialized\n"))
-	}
+	initialize();
 	db = new database();
-	opened = 0;
+	fopened = 0;
 	rootbtree = NULL;
 	D(printf("Pogo created\n"))
 	if( cfgfile ) open(cfgfile);
@@ -710,21 +891,25 @@ int     Pogo::open(const char* cfgfile) {
 	close();
 	boolean ret = db->open(cfgfile);
 	if( ret ) {
-		opened = 1;
+		D(printf("Pogo opened(%s)\n", cfgfile))
+		fopened = 1;
 		db->get_root(rootbtree);
 		rootbtree->initialize();
 		return 1;
 	}
+	D(printf("Pogo fails to open(%s)\n", cfgfile))
 	return 0;
 }
 void     Pogo::close() {
-	if( opened ) {
+	if( fopened ) {
 		rootbtree = NULL;
 		db->close();
-		opened = 0;
+		fopened = 0;
 	}
 }
-Pbtree*   Pogo::root() {
+int      Pogo::opened() const { return fopened; }
+
+Pvar*    Pogo::root() {
 	return wrap(rootbtree);
 }
 void     Pogo::begin_transaction() {
@@ -738,5 +923,19 @@ void     Pogo::end_transaction() {
 }
 char*    Pogo::perl_class() const { return "Pogo"; }
 
+void Pogo::initialize() {
+	if( !task_initialized ) {
+		task::initialize(task::huge_stack);
+		task_initialized = 1;
+		D(printf("task initialized\n"))
+	}
+}
+
 int Pogo::task_initialized = 0;
 
+#ifdef GLOBALDB
+Pogo POGOOBJ;
+Pogo* Pogo::POGOOBJ() {
+	return &::POGOOBJ;
+}
+#endif

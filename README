@@ -1,5 +1,5 @@
 Pogo - Perl GOODS interface
-(C)1999 Sey Nakajima <sey@jkc.co.jp>
+(C)1999-2004 Sey Nakajima <nakajima@netstock.co.jp>
 
 This is a Perl inteface module for GOODS (Generic Object Oriented Database 
 System). GOODS is written by Konstantin Knizhnik <knizhnik@altavista.net>.
@@ -9,18 +9,18 @@ This is a free software.
 This module is in 'alpha' phase. All features may be changed.
 Please send me your bug reports or suggestions.
 
-I have developped and tested this on FreeBSD2.2.8, FreeBSD3.4, and Linux MLD4.
+I have developped and tested this on FreeBSD4.7 and FreeBSD4.9.
 Please test in another OS and send me your porting informations.
 
 -----
 Prepare GOODS 
 
   get goods-x.xx.tar.gz from any one of follows (x.xx is a revision number)
-    http://www.ispras.ru/~knizhnik/goods.html
-    http://www.geocities.com/SiliconValley/Orchard/5802/goods.html
+    http://www.garret.ru/~knizhnik/goods.html
     http://hp1.jonex.ne.jp/~nakajima.yasushi/
 
-  NOTE: goods-2.24.tar.gz has a bug. If it is a latest revision, use 2.23.
+  NOTE: goods-2.74.tar.gz and goods-2.75.tar.gz has a bug. Please use
+  2.76 or later.
 
   tar zxvf goods-x.xx.tar.gz
   cd goods
@@ -55,6 +55,9 @@ Make,test and install Pogo
   run goodsrv with test.cfg. The command line './startgoodsrv test &' does 
   this as background process and './cmdgoodsrv test exit' terminates the 
   goodsrv.
+
+  NOTE: If 'make test' fails with segmentation fault, try 
+  'perl Makefile.PL -DGLOBALDB'.
 
 -----
 Database browser

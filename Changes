@@ -35,3 +35,22 @@ Revision history for Perl extension Pogo.
 	- fix a bug in pogocall.c
 	- modify documents in PogoLink.pm
 	- add PogoLink.jp.pod
+
+0.09  
+	- CAUTION! database structure is changed! 
+	- make Pogo and Pogo::* classes derivable
+	- modify new_tie's to take not $pogo but $pogovar
+	- add Pogo::get_root_tie(), Pvar::root_tie(), Pvar::root()
+	- modify Pogo::equal() to be available for not object
+	- modify PogoLink.pm to be available for array or pseudo-hash objects
+	- modify PogoLink::*::new to accept $size argument
+	- modify PogoLink::* classes to use array but hash
+	- change Pogo::Array default size to 0 but 1
+	- fix a bug of Pogo::type_of()
+	- task::initialize() at bootstrap
+	- Pogo::Var::call() can return list
+
+0.10
+	- -D option for Makefile.PL available
+	- Pogo::opened() method added
+	- Pogo::get_root_tie method added

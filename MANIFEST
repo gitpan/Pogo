@@ -2,13 +2,15 @@ Changes
 MANIFEST
 Makefile.PL
 Makefile.PL.freebsd
+Makefile.PL.freebsd-pthread
 Makefile.PL.linux
 Makefile.PL.linux-pthread
 Pogo.jp.pod
 Pogo.pm
 Pogo.xs
-PogoLink.pm
+PogoIndex.pm
 PogoLink.jp.pod
+PogoLink.pm
 README
 README.jp
 TODO
@@ -29,3 +31,5 @@ typemap
 sample/sample.cfg
 sample/schedule.pl
 sample/person.pl
+sample/MyHash.pm
+sample/Person.pm

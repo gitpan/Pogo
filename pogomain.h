@@ -2,6 +2,7 @@
 // 1999 Sey
 #ifndef _POGOMAIN_H_
 #define _POGOMAIN_H_
+#include "pogocall.h"
 
 // symbol _INXS_ means being compiled in Pogo.xs
 // Why is this ugly macro necessary? Becase the symbol 'ref' conflicts
@@ -16,17 +17,21 @@ public:
 	
 	char*    get_class() const;
 	void     set_class(const char*);
-	int      _call(void* func, void* argref);
+	char*    get_pclass() const;
+	void     set_pclass(const char*);
+	callresult _call(void* func, void* argref);
 	
 	METACLASS_DECLARATIONS(pVar, object);
 protected:
-	ref<eString> classname;
+	ref<eString> pclass;		// class name for Pogo::* object itself
+	ref<eString> blessclass;
 };
 
 class pScalar : public pVar {
 public:
 	pScalar();
-	static  ref<pScalar> create() { return new pScalar(); }
+	static  ref<pScalar> create() 
+		{ return new pScalar(); }
 	
 	ref<object> get() const;
 	void set(ref<object> val);
@@ -58,7 +63,8 @@ protected:
 class pArray : public pVar {
 public:
 	pArray(unsigned size);
-	static ref<pArray> create(unsigned size) { return new pArray(size); }
+	static ref<pArray> create(unsigned size) 
+		{ return new pArray(size); }
 	
 	ref<object> get(unsigned idx) const;
 	void     set(unsigned idx, ref<object> val);
@@ -78,7 +84,8 @@ protected:
 class pHash : public pVar {
 public:
 	pHash(unsigned size);
-	static ref<pHash> create(unsigned size) { return new pHash(size); }
+	static ref<pHash> create(unsigned size) 
+		{ return new pHash(size); }
 	
 	ref<object> get(const char* key) const;
 	void     set(const char* key, ref<object> val);
@@ -140,7 +147,8 @@ protected:
 class pHtree : public pVar {
 public:
 	pHtree(unsigned size);
-	static ref<pHtree> create(unsigned size) { return new pHtree(size); }
+	static ref<pHtree> create(unsigned size)
+		{ return new pHtree(size); }
 	
 	ref<object> get(const char* key) const;
 	void     set(const char* key, ref<object> val);
@@ -154,6 +162,28 @@ public:
 protected:
 	ref<eHtree> htree;
 };
+
+class pSortedNumArray : public pVar {
+public:
+	pSortedNumArray(unsigned size);
+	static ref<pSortedNumArray> create(unsigned size)
+		{ return new pSortedNumArray(size); }
+	
+	int      get(unsigned idx) const;
+	int      find(int val) const;
+	int      findGE(int val) const;
+	void     set(int val);
+	void     ins(int val);
+	void     del(int val);
+	unsigned  get_size() const;
+	void     set_size(unsigned size);
+	void     clear();
+	
+	METACLASS_DECLARATIONS(pSortedNumArray, pVar);
+protected:
+	ref<SortedNumArray> snarray;
+};
+
 #endif
 
 // ------------------------------------------------------------------
@@ -167,6 +197,7 @@ class Phash;
 class Phtree;
 class Pbtree;
 class Pntree;
+class Psnarray;
 
 // database class
 class Pogo {
@@ -178,22 +209,28 @@ class Pogo {
 	friend class Phtree;
 	friend class Pbtree;
 	friend class Pntree;
+	friend class Psnarray;
 public:
 	Pogo(const char* cfgfile = NULL);
 	~Pogo();
 	int      open(const char* cfgfile);
 	void     close();
-	Pbtree*  root();
+	int      opened() const;
+	Pvar*    root();
 	void     begin_transaction();
 	void     abort_transaction();
 	void     end_transaction();
 	char*    perl_class() const;
+	static void initialize();
+#ifdef GLOBALDB
+	static Pogo* POGOOBJ();
+#endif
 #ifndef _INXS_
 protected:
-    static int task_initialized;
-    int        opened;
-    database*  db;
-    ref<pBtree> rootbtree;
+	static int task_initialized;
+	int        fopened;
+	database*  db;
+	ref<pBtree> rootbtree;
 #endif
 };
 
@@ -203,13 +240,16 @@ public:
 	virtual ~Pvar() {}
 	char*    get_class() const;
 	void     set_class(const char*);
+	char*    get_pclass() const;
+	void     set_pclass(const char*);
 	void     begin_transaction();
 	void     abort_transaction();
 	void     end_transaction();
-	int      _call(void* func, void* argref);
-	int      equal(const Pvar* var);
+	callresult _call(void* func, void* argref);
+	int      _equal(const Pvar* var);
 	int      wait_modification(unsigned sec);
 	unsigned object_id();
+	Pvar*    root();
 	// You probably think why both perl_class() and _perl_class() exist.
 	// The reason is that virtual functions are not available in XS code.
 	char*   perl_class() const;
@@ -225,6 +265,7 @@ public:
 class Pstring : public Pvar {
 public:
 	Pstring(const nstring* str, Pogo* pogo = NULL);
+	Pstring(const nstring* str, Pvar* pvar);
 	~Pstring();
 	nstring* get() const;
 	void     set(const nstring* str);
@@ -242,6 +283,7 @@ protected:
 class Pscalar : public Pvar {
 public:
 	Pscalar(Pogo* pogo = NULL);
+	Pscalar(Pvar* pvar);
 	~Pscalar();
 	Pvar*    get() const;
 	void     set(const Pvar* val);
@@ -260,6 +302,7 @@ protected:
 class Parray : public Pvar {
 public:
 	Parray(unsigned size, Pogo* pogo = NULL);
+	Parray(unsigned size, Pvar* pvar);
 	~Parray();
 	Pvar*    get(unsigned idx) const;
 	void     set(unsigned idx, const Pvar* val);
@@ -287,6 +330,7 @@ protected:
 class Phash : public Pvar {
 public:
 	Phash(unsigned size, Pogo* pogo = NULL);
+	Phash(unsigned size, Pvar* pvar);
 	~Phash();
 	Pvar*    get(const char* key) const;
 	void     set(const char* key, const Pvar* val);
@@ -310,6 +354,7 @@ protected:
 class Phtree : public Pvar {
 public:
 	Phtree(unsigned size, Pogo* pogo = NULL);
+	Phtree(unsigned size, Pvar* pvar);
 	~Phtree();
 	Pvar*    get(const char* key) const;
 	void     set(const char* key, const Pvar* val);
@@ -333,6 +378,7 @@ protected:
 class Pbtree : public Pvar {
 public:
 	Pbtree(Pogo* pogo = NULL);
+	Pbtree(Pvar* pvar);
 	~Pbtree();
 	Pvar*    get(const char* key) const;
 	void     set(const char* key, const Pvar* val);
@@ -359,6 +405,7 @@ protected:
 class Pntree : public Pvar {
 public:
 	Pntree(Pogo* pogo = NULL);
+	Pntree(Pvar* pvar);
 	~Pntree();
 	Pvar*    get(const char* key) const;
 	void     set(const char* key, const Pvar* val);
@@ -381,6 +428,31 @@ protected:
 #endif
 };
 
+// sorted number array class
+class Psnarray : public Pvar {
+public:
+	Psnarray(unsigned size, Pogo* pogo = NULL);
+	Psnarray(unsigned size, Pvar* pvar);
+	~Psnarray();
+	int     get(unsigned idx) const;
+	int      find(int val) const;
+	int      findGE(int val) const;
+	void     set(int val);
+	void     ins(int val);
+	void     del(int val);
+	unsigned get_size() const;
+	void     set_size(unsigned size);
+	void     clear();
+	char*    perl_class() const;
+#ifndef _INXS_
+	char*    _perl_class() const;
+	ref<object> strip() const;
+	Psnarray(ref<pSortedNumArray> psnarr);
+protected:
+	ref<pSortedNumArray> snarray;
+#endif
+};
+
 #ifndef _INXS_
 // utility functions
 Pvar* wrap(ref<object> val);
@@ -394,3 +466,4 @@ Pntree* wrap(ref<pNtree> val);
 #endif
 
 #endif
+
